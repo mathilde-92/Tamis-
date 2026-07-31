@@ -132,8 +132,8 @@ function localAnalyse(text) {
    Le serveur Render doit renvoyer la réponse Infomaniak telle quelle
    (format compatible OpenAI : data.choices[0].message.content).
    ============================================================ */
-const BACKEND_URL = "https://TON-BACKEND.onrender.com"; // ← à remplacer une fois Render en place
-const MODELE_IA = "mistral-small"; // ← à ajuster selon les modèles actifs sur ton compte Infomaniak
+const BACKEND_URL = "https://tamise-backend.onrender.com";
+const MODELE_IA = "mistral24b";
 
 async function appellerIA(prompt, maxTokens) {
   const response = await fetch(BACKEND_URL + "/api/ia", {
