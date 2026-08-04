@@ -4,8 +4,8 @@
   "description": "Filtrer. Apaiser. Relier.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#F8F5F2",
-  "theme_color": "#F8F5F2",
+  "background_color": "#CCD4CD",
+  "theme_color": "#CCD4CD",
   "orientation": "portrait",
   "icons": [
     {
