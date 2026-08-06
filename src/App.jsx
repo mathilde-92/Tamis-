@@ -4055,7 +4055,7 @@ export default function TamiseApp() {
         .voile { animation: voile .4s ease both; }
         ::-webkit-scrollbar{ width:0 }
         @media (prefers-reduced-motion: reduce){ .voile{ animation:none } }
-        html, body, #root { height: 100%; touch-action: manipulation; overflow: hidden; overscroll-behavior: none; background: #E9E2D6; }
+        html, body, #root { height: 100%; margin: 0; padding: 0; touch-action: manipulation; overflow: hidden; overscroll-behavior: none; background: #E9E2D6; }
         /* Sur un vrai téléphone (l'essentiel des cas réels), le cadre de
            démonstration s'efface : l'app remplit tout l'écran, sans marge
            ni coins arrondis. Au-delà de 480px (ordinateur, aperçu), le
@@ -4066,7 +4066,7 @@ export default function TamiseApp() {
         }
       `}</style>
 
-      <div className="tamise-phone" style={{ width: 390, height: 800, ...BG_LAYERED, borderRadius: 44, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 30px 80px rgba(69,62,54,0.25), inset 0 0 0 1px rgba(69,62,54,0.04)", position: "relative" }}>
+      <div className="tamise-phone" style={{ width: 390, height: 800, boxSizing: "border-box", ...BG_LAYERED, borderRadius: 44, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 30px 80px rgba(69,62,54,0.25), inset 0 0 0 1px rgba(69,62,54,0.04)", position: "relative", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
         <Grain opacity={0.05} />
 
         {/* ---------- Accueil : tutoriel (genre + visite guidée) ---------- */}
@@ -4115,7 +4115,7 @@ export default function TamiseApp() {
 
         {/* ---------- Intercalaires (relations) — forme d'onglets de classeur ---------- */}
         {!(tab === "plus" && plusVue === "reperer") && (
-          <div style={{ borderBottom: `1px solid ${C.grey}`, padding: "10px 14px" }}>
+          <div style={{ padding: "10px 14px" }}>
             <div style={{ display: "flex", gap: 6, alignItems: "center", overflowX: "auto" }}>
               {relations.map((r) => {
                 const actif = r.id === relId;
