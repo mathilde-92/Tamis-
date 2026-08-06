@@ -4062,11 +4062,11 @@ export default function TamiseApp() {
            cadre "téléphone" reste affiché pour la présentation. */
         @media (max-width: 480px) {
           .tamise-shell { min-height: 100vh; min-height: 100dvh; padding: 0 !important; }
-          .tamise-phone { width: 100% !important; height: 100vh !important; height: 100dvh !important; border-radius: 0 !important; box-shadow: none !important; }
+          .tamise-phone { width: 100% !important; height: 100vh !important; height: 100dvh !important; border-radius: 0 !important; box-shadow: none !important; padding-top: env(safe-area-inset-top, 0px) !important; }
         }
       `}</style>
 
-      <div className="tamise-phone" style={{ width: 390, height: 800, boxSizing: "border-box", ...BG_LAYERED, borderRadius: 44, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 30px 80px rgba(69,62,54,0.25), inset 0 0 0 1px rgba(69,62,54,0.04)", position: "relative", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+      <div className="tamise-phone" style={{ width: 390, height: 800, boxSizing: "border-box", ...BG_LAYERED, borderRadius: 44, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 30px 80px rgba(69,62,54,0.25), inset 0 0 0 1px rgba(69,62,54,0.04)", position: "relative" }}>
         <Grain opacity={0.05} />
 
         {/* ---------- Accueil : tutoriel (genre + visite guidée) ---------- */}
