@@ -3257,6 +3257,55 @@ function EcranDiversion({ onRevenir }) {
   );
 }
 
+/* ---- Barre de navigation flottante (style Clue) ---- */
+function BottomNav({ active, onChange }) {
+  const items = [
+    { key: "messages", label: "Messages", Icon: MessageCircle },
+    { key: "agenda", label: "Agenda", Icon: CalendarDays },
+    { key: "coach", label: "Iris", Icon: TamiseMark },
+    { key: "depenses", label: "Dépenses", Icon: Receipt },
+    { key: "plus", label: "Plus", Icon: LayoutGrid },
+  ];
+  const n = items.length;
+  const activeIndex = items.findIndex((i) => i.key === active); // -1 si aucun onglet actif
+
+  return (
+    <div style={{ position: "fixed", left: 0, right: 0, zIndex: 30,
+      bottom: "calc(8px + env(safe-area-inset-bottom, 0px))",
+      padding: "0 14px", pointerEvents: "none" }}>
+      <div style={{ position: "relative", display: "flex", pointerEvents: "auto",
+        background: "rgba(248,245,242,0.92)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)",
+        borderRadius: 24, padding: 5, border: "1.5px solid rgba(255,255,255,0.95)",
+        boxShadow: "0 6px 22px rgba(69,62,54,0.20), 0 1px 3px rgba(69,62,54,0.10)" }}>
+        {/* pastille blanche qui glisse sous l'onglet actif */}
+        {activeIndex >= 0 && (
+          <div style={{ position: "absolute", top: 5, bottom: 5,
+            left: `calc(${activeIndex} * ((100% - 10px) / ${n}) + 5px)`,
+            width: `calc((100% - 10px) / ${n})`,
+            background: "#FFFFFF", borderRadius: 19,
+            boxShadow: "0 2px 8px rgba(69,62,54,0.16)",
+            transition: "left .32s cubic-bezier(.4,1.3,.5,1)" }} />
+        )}
+        {items.map(({ key, label, Icon }) => {
+          const on = active === key;
+          return (
+            <button key={key} onClick={() => onChange(key)}
+              style={{ position: "relative", zIndex: 1, flex: 1, background: "transparent", border: "none",
+                borderRadius: 19, padding: "7px 2px", display: "flex", flexDirection: "column",
+                alignItems: "center", gap: 3, cursor: "pointer",
+                color: on ? C.taupe : C.inkSoft, fontFamily: "inherit",
+                transition: "color .3s ease" }}>
+              <Icon size={20} strokeWidth={on ? 2.5 : 2}
+                style={{ transition: "transform .3s ease", transform: on ? "translateY(-1px)" : "none" }} />
+              <span style={{ fontSize: 11, fontWeight: on ? 700 : 500 }}>{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function EcranVerrouillage({ pinCode, onUnlock }) {
   const [saisie, setSaisie] = useState("");
   const [erreur, setErreur] = useState(false);
@@ -4056,17 +4105,18 @@ export default function TamiseApp() {
         ::-webkit-scrollbar{ width:0 }
         @media (prefers-reduced-motion: reduce){ .voile{ animation:none } }
         html, body, #root { height: 100%; margin: 0; padding: 0; touch-action: manipulation; overflow: hidden; overscroll-behavior: none; background: #E9E2D6; }
+        html, body { position: fixed; inset: 0; }
         /* Sur un vrai téléphone (l'essentiel des cas réels), le cadre de
            démonstration s'efface : l'app remplit tout l'écran, sans marge
            ni coins arrondis. Au-delà de 480px (ordinateur, aperçu), le
            cadre "téléphone" reste affiché pour la présentation. */
         @media (max-width: 480px) {
           .tamise-shell { min-height: 100vh; min-height: 100dvh; padding: 0 !important; }
-          .tamise-phone { width: 100% !important; height: 100vh !important; height: 100dvh !important; border-radius: 0 !important; box-shadow: none !important; padding-top: env(safe-area-inset-top, 0px) !important; }
+          .tamise-phone { width: 100% !important; height: 100vh !important; height: 100dvh !important; border-radius: 0 !important; box-shadow: none !important; padding-top: 50px !important; }
         }
       `}</style>
 
-      <div className="tamise-phone" style={{ width: 390, height: 800, boxSizing: "border-box", ...BG_LAYERED, borderRadius: 44, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 30px 80px rgba(69,62,54,0.25), inset 0 0 0 1px rgba(69,62,54,0.04)", position: "relative" }}>
+      <div className="tamise-phone" style={{ width: 390, height: 800, boxSizing: "border-box", ...BG_LAYERED, borderRadius: 44, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 30px 80px rgba(69,62,54,0.25), inset 0 0 0 1px rgba(69,62,54,0.04)", position: "relative", transform: "translateZ(0)" }}>
         <Grain opacity={0.05} />
 
         {/* ---------- Accueil : tutoriel (genre + visite guidée) ---------- */}
@@ -4180,7 +4230,7 @@ export default function TamiseApp() {
         )}
 
         {/* ---------- Contenu ---------- */}
-        <div ref={contenuRef} style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", padding: tab === "plus" && plusVue === "reperer" ? "18px 18px 14px" : "6px 16px 14px", zoom: tailleTexte, ...(tab === "plus" && plusVue === "menu" ? { display: "flex", flexDirection: "column", minHeight: 0 } : {}) }}>
+        <div ref={contenuRef} style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", padding: tab === "plus" && plusVue === "reperer" ? "18px 18px 14px" : "6px 16px 14px", paddingBottom: "calc(84px + env(safe-area-inset-bottom, 0px))", zoom: tailleTexte, ...(tab === "plus" && plusVue === "menu" ? { display: "flex", flexDirection: "column", minHeight: 0 } : {}) }}>
 
           {/* ===== MESSAGES ===== */}
           {tab === "messages" && (
@@ -4952,41 +5002,7 @@ export default function TamiseApp() {
         )}
 
         {/* ---------- Navigation ---------- */}
-        {(() => {
-          const items = [
-            { id: "messages", icone: MessageCircle, label: "Messages" },
-            { id: "agenda", icone: CalendarDays, label: "Agenda" },
-            { id: "coach", icone: TamiseMark, label: "Iris" },
-            { id: "depenses", icone: Receipt, label: "Dépenses" },
-            { id: "plus", icone: LayoutGrid, label: "Plus" },
-          ];
-          const n = items.length;
-          const activeIndex = items.findIndex((t) => t.id === tab);
-          return (
-            <div style={{ padding: "10px 6px 18px", background: "rgba(255,255,255,0.6)", backdropFilter: "blur(18px) saturate(1.3)", WebkitBackdropFilter: "blur(18px) saturate(1.3)", borderTop: "1px solid rgba(255,255,255,0.5)" }}>
-              <div style={{ position: "relative", display: "flex" }}>
-                {activeIndex >= 0 && (
-                  <div style={{ position: "absolute", top: 2, bottom: 2,
-                    left: `calc(${activeIndex} * (100% / ${n}) + 4px)`,
-                    width: `calc(100% / ${n} - 8px)`,
-                    background: "#FFFFFF", borderRadius: 16,
-                    boxShadow: "0 6px 16px rgba(69,62,54,0.18), 0 1px 3px rgba(69,62,54,0.1)" }} />
-                )}
-                {items.map((t) => {
-                  const Ic = t.icone;
-                  const actif = tab === t.id;
-                  return (
-                    <button key={t.id} onClick={() => { setTab(t.id); setVueDestinataire(false); if (t.id === "plus") setPlusVue("menu"); }}
-                      style={{ position: "relative", zIndex: 1, flex: 1, border: "none", background: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, fontFamily: "inherit", padding: "9px 4px", transition: "transform .2s", transform: actif ? "translateY(-1px)" : "none" }}>
-                      <Ic size={21} strokeWidth={actif ? 2.4 : 2} color={actif ? C.taupe : C.inkSoft} />
-                      <span style={{ fontSize: 10, fontWeight: actif ? 800 : 600, color: actif ? C.ink : C.inkSoft }}>{t.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })()}
+        <BottomNav active={tab} onChange={(id) => { setTab(id); setVueDestinataire(false); if (id === "plus") setPlusVue("menu"); }} />
 
         {/* ---------- Voile de médiation ---------- */}
         {mediation && (
