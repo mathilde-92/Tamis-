@@ -4055,7 +4055,7 @@ export default function TamiseApp() {
         .voile { animation: voile .4s ease both; }
         ::-webkit-scrollbar{ width:0 }
         @media (prefers-reduced-motion: reduce){ .voile{ animation:none } }
-        html, body, #root { height: 100%; touch-action: manipulation; }
+        html, body, #root { height: 100%; touch-action: manipulation; overflow: hidden; overscroll-behavior: none; background: #E9E2D6; }
         /* Sur un vrai téléphone (l'essentiel des cas réels), le cadre de
            démonstration s'efface : l'app remplit tout l'écran, sans marge
            ni coins arrondis. Au-delà de 480px (ordinateur, aperçu), le
@@ -4180,7 +4180,7 @@ export default function TamiseApp() {
         )}
 
         {/* ---------- Contenu ---------- */}
-        <div ref={contenuRef} style={{ flex: 1, overflowY: "auto", padding: tab === "plus" && plusVue === "reperer" ? "18px 18px 14px" : "6px 16px 14px", zoom: tailleTexte, ...(tab === "plus" && plusVue === "menu" ? { display: "flex", flexDirection: "column", minHeight: 0 } : {}) }}>
+        <div ref={contenuRef} style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", padding: tab === "plus" && plusVue === "reperer" ? "18px 18px 14px" : "6px 16px 14px", zoom: tailleTexte, ...(tab === "plus" && plusVue === "menu" ? { display: "flex", flexDirection: "column", minHeight: 0 } : {}) }}>
 
           {/* ===== MESSAGES ===== */}
           {tab === "messages" && (
