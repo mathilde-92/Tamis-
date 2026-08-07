@@ -2706,12 +2706,58 @@ function EcranVerrouillage({ pinCode, onUnlock }) {
   );
 }
 
-function Onboarding({ genre, setGenre, onFinish, onCreerPremiereRelation, onUtiliserDemo, codeInvitation, onRejoindreInvitation, startSlide = 0 }) {
+/* ---- Écran affiché dès qu'un lien d'invitation est ouvert — indépendant du
+   tutoriel, pour fonctionner aussi bien au premier lancement que sur un
+   téléphone qui connaît déjà Tamisé. ---- */
+function EcranInvitationRecue({ codeInvitation, onRejoindre }) {
+  const [nom, setNom] = useState("");
+  const [chargement, setChargement] = useState(false);
+  const [erreur, setErreur] = useState(null);
+  return (
+    <div className="voile" style={{ position: "absolute", inset: 0, zIndex: 60, background: "linear-gradient(165deg,#E9E2D6 0%,#F3EEE6 55%,#E5DFD6 100%)", display: "flex", flexDirection: "column", padding: "calc(env(safe-area-inset-top, 0px) + 64px) 26px 26px", overflowY: "auto" }}>
+      <div style={{ textAlign: "center", marginBottom: 20 }}>
+        <div style={{ width: 60, height: 60, borderRadius: 999, background: C.sageBg, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", boxShadow: "0 10px 24px -10px rgba(69,62,54,0.28)" }}>
+          <Users size={26} color="#4A5F42" />
+        </div>
+        <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, color: C.ink, fontWeight: 600 }}>Tu as été invité·e</div>
+        <p style={{ fontSize: 13, color: C.inkSoft, lineHeight: 1.55, margin: "8px 0 0" }}>
+          Quelqu'un souhaite s'organiser avec toi sur Tamisé. Dis-nous simplement comment tu t'appelles.
+        </p>
+      </div>
+      <div style={{ background: C.beigeSoft, borderRadius: 14, padding: "12px 14px", textAlign: "center", marginBottom: 16 }}>
+        <div style={{ fontSize: 11, color: C.inkSoft, marginBottom: 4 }}>Code d'invitation reçu</div>
+        <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, color: C.ink, letterSpacing: 4 }}>{codeInvitation}</div>
+      </div>
+      <input value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Ton prénom" autoFocus
+        style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "13px 15px", fontSize: 15, fontFamily: "inherit", color: C.ink, marginBottom: 12 }} />
+      {erreur && <p style={{ fontSize: 12, color: C.brick, lineHeight: 1.5, marginBottom: 10 }}>{erreur}</p>}
+      <button onClick={async () => {
+        setChargement(true); setErreur(null);
+        try {
+          const r = await rejoindreRelationServeur(codeInvitation, nom.trim());
+          onRejoindre({ relationId: r.relationId, nomAutre: r.nomAutre, type: r.type });
+        } catch (e) {
+          const m = String(e.message || "");
+          setErreur(
+            m.includes("inconnu") ? "Cette invitation n'est plus valable."
+            : m.includes("déjà") ? "Cette invitation a déjà été utilisée."
+            : "Connexion impossible pour l'instant. Réessaie dans un moment."
+          );
+        }
+        setChargement(false);
+      }} disabled={!nom.trim() || chargement}
+        style={{ width: "100%", border: "none", cursor: nom.trim() ? "pointer" : "default", background: nom.trim() ? C.taupe : C.grey, color: nom.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        {chargement && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
+        Rejoindre
+      </button>
+    </div>
+  );
+}
+
+function Onboarding({ genre, setGenre, onFinish, onCreerPremiereRelation, startSlide = 0 }) {
   const [i, setI] = useState(startSlide);
   const [relType, setRelType] = useState(null);
   const [relNom, setRelNom] = useState("");
-  const [erreurInvit, setErreurInvit] = useState(null);
-  const [chargementInvit, setChargementInvit] = useState(false);
   const TOUR = [
     { Icon: MessageCircle, titre: "Messages",
       accroche: ["Tu n'auras plus la boule au ventre", "avant d'ouvrir un message."],
@@ -2806,48 +2852,7 @@ function Onboarding({ genre, setGenre, onFinish, onCreerPremiereRelation, onUtil
         </div>
       )}
 
-      {isPremiereRelation && codeInvitation && (
-        <div className="voile" style={{ flex: 1, display: "flex", flexDirection: "column", paddingTop: 64, position: "relative", zIndex: 1, overflowY: "auto" }}>
-          <div style={{ textAlign: "center", marginBottom: 20 }}>
-            <div style={{ width: 60, height: 60, borderRadius: 999, background: C.sageBg, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", boxShadow: "0 10px 24px -10px rgba(69,62,54,0.28)" }}>
-              <Users size={26} color="#4A5F42" />
-            </div>
-            <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, color: C.ink, fontWeight: 600 }}>Tu as été invité·e</div>
-            <p style={{ fontSize: 13, color: C.inkSoft, lineHeight: 1.55, margin: "8px 0 0" }}>
-              Quelqu'un souhaite s'organiser avec toi sur Tamisé. Dis-nous simplement comment tu t'appelles.
-            </p>
-          </div>
-          <div style={{ background: C.beigeSoft, borderRadius: 14, padding: "12px 14px", textAlign: "center", marginBottom: 16 }}>
-            <div style={{ fontSize: 11, color: C.inkSoft, marginBottom: 4 }}>Code d'invitation reçu</div>
-            <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, color: C.ink, letterSpacing: 4 }}>{codeInvitation}</div>
-          </div>
-          <input value={relNom} onChange={(e) => setRelNom(e.target.value)} placeholder="Ton prénom" autoFocus
-            style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "13px 15px", fontSize: 15, fontFamily: "inherit", color: C.ink, marginBottom: 12 }} />
-          {erreurInvit && <p style={{ fontSize: 12, color: C.brick, lineHeight: 1.5, marginBottom: 10 }}>{erreurInvit}</p>}
-          <button onClick={async () => {
-            setChargementInvit(true); setErreurInvit(null);
-            try {
-              const r = await rejoindreRelationServeur(codeInvitation, relNom.trim());
-              onRejoindreInvitation({ relationId: r.relationId, nomAutre: r.nomAutre, type: r.type });
-              setI(i + 1);
-            } catch (e) {
-              const m = String(e.message || "");
-              setErreurInvit(
-                m.includes("inconnu") ? "Cette invitation n'est plus valable."
-                : m.includes("déjà") ? "Cette invitation a déjà été utilisée."
-                : "Connexion impossible pour l'instant. Réessaie dans un moment."
-              );
-            }
-            setChargementInvit(false);
-          }} disabled={!relNom.trim() || chargementInvit}
-            style={{ width: "100%", border: "none", cursor: relNom.trim() ? "pointer" : "default", background: relNom.trim() ? C.taupe : C.grey, color: relNom.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            {chargementInvit && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
-            Rejoindre
-          </button>
-        </div>
-      )}
-
-      {isPremiereRelation && !codeInvitation && (
+      {isPremiereRelation && (
         <div className="voile" style={{ flex: 1, display: "flex", flexDirection: "column", paddingTop: 64, position: "relative", zIndex: 1, overflowY: "auto" }}>
           <div style={{ textAlign: "center", marginBottom: 20 }}>
             <div style={{ width: 60, height: 60, borderRadius: 999, background: C.beigeSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", boxShadow: "0 10px 24px -10px rgba(69,62,54,0.28)" }}>
@@ -2869,11 +2874,8 @@ function Onboarding({ genre, setGenre, onFinish, onCreerPremiereRelation, onUtil
               style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "13px 15px", fontSize: 15, fontFamily: "inherit", color: C.ink, marginBottom: 14 }} />
           )}
           <button onClick={() => { onCreerPremiereRelation(relNom.trim(), relType); setI(i + 1); }} disabled={!relType || !relNom.trim()}
-            style={{ width: "100%", border: "none", cursor: relType && relNom.trim() ? "pointer" : "default", background: relType && relNom.trim() ? C.taupe : C.grey, color: relType && relNom.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", marginBottom: 10 }}>
+            style={{ width: "100%", border: "none", cursor: relType && relNom.trim() ? "pointer" : "default", background: relType && relNom.trim() ? C.taupe : C.grey, color: relType && relNom.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", marginBottom: 14 }}>
             Créer cette relation
-          </button>
-          <button onClick={() => { onUtiliserDemo(); setI(i + 1); }} style={{ width: "100%", border: "none", background: "none", cursor: "pointer", color: C.inkSoft, fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", padding: "6px", marginBottom: 14 }}>
-            Découvrir avec un exemple, pour l'instant
           </button>
         </div>
       )}
@@ -2923,87 +2925,10 @@ export default function TamiseApp() {
   const [tailleTexte, setTailleTexte] = useState(1); // 0.9 | 1 | 1.15 — échelle de police
 
   /* --- Relations (intercalaires) : chacune a ses propres données --- */
-  const [relations, setRelations] = useState(() => chargerLocal("relations", null) || [{
-    id: "karim", nom: "Karim", type: "coparent", tel: "06 12 34 56 78", emoji: "🧑🏻",
-    messages: [
-      { id: -3, de: "autre", texteOriginal: "T'es vraiment jamais capable d'être à l'heure, comme d'habitude.", texte: "J'aimerais qu'on arrive à respecter les horaires convenus, c'est important pour moi.", filtre: true, heure: "08:05", date: "2026-06-02", niveau: "problematique" },
-      { id: -2, de: "moi", texteOriginal: "Bonjour, je pense qu'on devrait revoir l'organisation du mercredi.", texteEnvoye: "Bonjour, je pense qu'on devrait revoir l'organisation du mercredi.", heure: "18:40", date: "2026-06-10", niveau: "sain", detections: [] },
-      { id: -1, de: "autre", texteOriginal: "Si tu changes encore les horaires, tu vas le regretter.", texte: null, retenu: true, heure: "20:12", date: "2026-06-21", niveau: "grave" },
-      { id: 0, de: "autre", texteOriginal: "De toute façon tu ne comprends jamais rien à ce qui compte pour les enfants.", texte: "J'ai l'impression qu'on ne voit pas les besoins des enfants de la même façon. On peut en parler ?", filtre: true, heure: "12:30", date: "2026-07-03", niveau: "problematique" },
-      { id: 1, de: "autre", texteOriginal: "Bonjour, je récupère les enfants à 17h vendredi comme prévu ?", texte: "Bonjour, je récupère les enfants à 17h vendredi comme prévu ?", heure: "09:12", date: "2026-07-16", niveau: "sain" },
-      { id: 2, de: "moi", texteOriginal: "Oui c'est noté, ils auront leurs sacs prêts.", texteEnvoye: "Oui c'est noté, ils auront leurs sacs prêts.", heure: "09:20", date: "2026-07-16", niveau: "sain", detections: [] },
-    ],
-    depenses: [
-      { id: "d1", nom: "Cantine — janvier", montant: 72, cat: "École", payePar: "moi", statut: "attente", regleLe: null, validation: "confirme", proposePar: "moi", info: "Les frais de cantine sont des dépenses courantes : en principe couverts par la pension alimentaire, sauf si le jugement prévoit un partage spécifique. Beaucoup de parents les partagent 50/50 ou au prorata des revenus. Vérifie la rubrique « frais de scolarité » de ton jugement. Informations indicatives — ne remplace pas un conseil juridique." },
-      { id: "d2", nom: "Orthodontiste — Léa", montant: 180, cat: "Santé", payePar: "autre", statut: "regle", regleLe: "2026-07-05", validation: "confirme", proposePar: "autre", info: "Les frais médicaux non remboursés sont généralement des dépenses exceptionnelles, partagées par moitié ou au prorata des revenus, à condition d'avoir été engagés d'un commun accord. Conserve justificatif et accord écrit. Informations indicatives." },
-      { id: "d3", nom: "Classe verte — avril", montant: 240, cat: "École", payePar: "moi", statut: "attente", regleLe: null, validation: "attente", proposePar: "autre", info: "Les voyages scolaires sont le plus souvent des frais exceptionnels : ils s'ajoutent à la pension et se partagent selon l'accord des parents ou la décision du juge. Usage le plus courant : 50/50. Informations indicatives." },
-    ],
-    agenda: [
-      { id: "e1", titre: "Orthodontiste Léa", allDay: false, start: "2026-07-16T17:30", end: "2026-07-16T18:15", cat: "Santé", tone: "sage", recurrence: "jamais", alerte: "60", statut: "confirme", proposePar: "moi" },
-      { id: "e2", titre: "Voir Benjamin", allDay: true, start: "2026-07-14", end: "2026-07-14", cat: "Famille", tone: "brick", recurrence: "jamais", alerte: "aucune", statut: "confirme", proposePar: "moi" },
-      { id: "e3", titre: "Judo Tom", allDay: false, start: "2026-07-15T14:00", end: "2026-07-15T15:30", cat: "Activité", tone: "grey", recurrence: "hebdo", alerte: "aucune", statut: "confirme", proposePar: "moi" },
-      { id: "e4", titre: "Passage de relais", allDay: false, start: "2026-07-17T17:00", end: "2026-07-17T17:30", cat: "Garde", tone: "beige", recurrence: "jamais", alerte: "1440", statut: "confirme", proposePar: "moi" },
-      { id: "e5", titre: "Anniversaire de Léa 🎂", allDay: true, start: "2026-07-18", end: "2026-07-18", cat: "Famille", tone: "brick", recurrence: "annuel", alerte: "aucune", statut: "confirme", proposePar: "moi" },
-      { id: "e6", titre: "Réunion parents-profs", allDay: false, start: "2026-07-22T18:00", end: "2026-07-22T19:00", cat: "École", tone: "grey", recurrence: "jamais", alerte: "60", statut: "attente", proposePar: "autre" },
-    ],
-    docs: [
-      { id: "d1", nom: "Jugement de divorce", cat: "Juridique", fichier: true },
-      { id: "d2", nom: "Convention parentale", cat: "Juridique", fichier: true },
-      { id: "d3", nom: "Attestation CAF", cat: "Administratif", fichier: false },
-      { id: "d4", nom: "Cahier de liaison — école", cat: "École", fichier: false },
-      { id: "d5", nom: "Carnet de santé — Léa", cat: "Santé", fichier: false },
-      { id: "d6", nom: "Adhésion judo — Tom", cat: "Sport", fichier: true },
-    ],
-    listes: [
-      { id: "l1", nom: "Rentrée scolaire", couleur: "sage", ouverte: true, items: [
-        { id: "i1", texte: "Acheter les cahiers de Tom", fait: false },
-        { id: "i2", texte: "Inscrire Léa à la cantine", fait: true },
-      ] },
-      { id: "l2", nom: "À acheter", couleur: "beige", ouverte: true, items: [
-        { id: "i3", texte: "Doliprane enfant", fait: false },
-      ] },
-    ],
-    groupesTaches: [],
-    enfants: [
-      { id: "c1", prenom: "Léa", emoji: "👧", naissance: "2016-03-12",
-        infos: { taille: "128 cm", poids: "27 kg", pointure: "32", vetements: "8 ans", allergies: "Aucune connue", medecin: "Dr Aymard — 01 23 45 67 89" },
-        modeGarde: { type: "semaine", debut: "2026-07-13", demarrePar: "moi" } },
-      { id: "c2", prenom: "Tom", emoji: "👦", naissance: "2018-09-02",
-        infos: { taille: "112 cm", poids: "20 kg", pointure: "27", vetements: "5 ans", allergies: "Arachides", medecin: "Dr Aymard — 01 23 45 67 89" },
-        modeGarde: { type: "weekend-alterne", debut: "2026-07-13", demarrePar: "moi" } },
-    ],
-    notesPassage: [
-      { id: "n1", enfantId: "c2", texte: "Léger rhume hier soir, un peu de fièvre (38°2). Doliprane à 12h si besoin.", tag: "Santé", auteur: "autre", date: "2026-07-16T09:10" },
-    ],
-    albums: [
-      { id: "al1", nom: "Anniversaire de Léa 2026", cree: "2026-07-18" },
-    ],
-    photos: [
-      { id: "p1", albumId: null, enfantId: "c1", auteur: "moi", date: "2026-07-10T14:22", legende: "Sortie au parc" },
-      { id: "p2", albumId: null, enfantId: "c2", auteur: "autre", date: "2026-07-12T18:05", legende: "" },
-      { id: "p3", albumId: "al1", enfantId: "c1", auteur: "moi", date: "2026-07-18T16:40", legende: "Le gâteau !" },
-    ],
-    notifPrefs: { actives: true, jours: ["L", "M", "M", "J", "V"], debut: "09:00", fin: "20:00" },
-    journal: [], journalSecret: [], alerte: false, questionnaire: null,
-  }, {
-    id: "sam", nom: "Sam", type: "travail", tel: "", emoji: "💼",
-    messages: [
-      { id: 1, de: "autre", texteOriginal: "Salut, tu peux me faire un point sur le projet client cette semaine ?", texte: "Salut, tu peux me faire un point sur le projet client cette semaine ?", heure: "10:02", date: "2026-07-14", niveau: "sain" },
-    ],
-    depenses: [], agenda: [], docs: [], enfants: [], notesPassage: [], photos: [], albums: [],
-    listes: [], groupesTaches: [
-      { id: "g1", nom: "To-Do", couleur: "beige", ouverte: true, taches: [
-        { id: "t1", nom: "Faire une appli pour la démo client", statut: "fait", priorite: "critical", echeance: null, fichiers: 0 },
-        { id: "t2", nom: "Doublage de la présentation", statut: "pas_commence", priorite: "high", echeance: "2026-07-28", fichiers: 0 },
-        { id: "t3", nom: "Relire le script d'intro", statut: "fait", priorite: "critical", echeance: null, fichiers: 0 },
-        { id: "t4", nom: "Point avec Sherlock (prestataire)", statut: "pas_commence", priorite: "medium", echeance: null, fichiers: 0 },
-      ] },
-    ],
-    notifPrefs: { actives: true, jours: ["L", "M", "M", "J", "V"], debut: "09:00", fin: "18:00" },
-    journal: [], journalSecret: [], alerte: false, questionnaire: null,
-  }]);
-  const [relId, setRelId] = useState(() => chargerLocal("relId", "karim"));
-  const rel = relations.find((r) => r.id === relId) || relations[0];
+  const [relations, setRelations] = useState(() => chargerLocal("relations", null) || []);
+  const [relId, setRelId] = useState(() => chargerLocal("relId", null));
+  const REL_VIDE = { id: "vide", nom: "", type: "coparent", tel: "", emoji: "🌸", messages: [], depenses: [], solde: "Rien à régler pour l'instant", agenda: [], docs: [], enfants: [], notesPassage: [], photos: [], albums: [], listes: [], groupesTaches: [], notifPrefs: { actives: true, jours: ["L", "M", "M", "J", "V", "S", "D"], debut: "08:00", fin: "21:00" }, journal: [], journalSecret: [], alerte: false, questionnaire: null };
+  const rel = relations.find((r) => r.id === relId) || relations[0] || REL_VIDE;
   const partenaire = rel.nom;
   const estCoparent = rel.type === "coparent";
   const messages = rel.messages;
@@ -3193,7 +3118,7 @@ export default function TamiseApp() {
   }, [relations]);
   const [diversionActive, setDiversionActive] = useState(false);
   // Code d'invitation éventuellement présent dans le lien d'ouverture (…/?code=ABC123)
-  const [codeInvitation] = useState(() => lireCodeInvitation());
+  const [codeInvitation, setCodeInvitation] = useState(() => lireCodeInvitation());
   const [personnesConfiance, setPersonnesConfiance] = useState([]);
   const [ajoutConfianceOuvert, setAjoutConfianceOuvert] = useState(false);
   const [noteLibreOuverte, setNoteLibreOuverte] = useState(false);
@@ -3494,23 +3419,30 @@ export default function TamiseApp() {
       <Grain opacity={0.05} />
 
         {/* ---------- Accueil : tutoriel (genre + visite guidée) ---------- */}
-        {onboarding && (
+        {codeInvitation && (
+          <EcranInvitationRecue codeInvitation={codeInvitation} onRejoindre={({ relationId, nomAutre, type }) => {
+            const id = "rel" + Date.now();
+            const emojis = { coparent: "🧑🏻", famille: "🏡", couple: "❤️", travail: "💼", ami: "🌿" };
+            setRelations((rs) => [...rs, { id, relationId, nom: nomAutre || "Ma relation", type: type || "coparent", tel: "", emoji: emojis[type] || "🌸", messages: [], depenses: [], solde: "Rien à régler pour l'instant", agenda: [], docs: [], enfants: [], notesPassage: [], photos: [], albums: [], listes: [], groupesTaches: [], notifPrefs: { actives: true, jours: ["L", "M", "M", "J", "V", "S", "D"], debut: "08:00", fin: "21:00" }, journal: [], journalSecret: [], alerte: false, questionnaire: { type } }]);
+            setRelId(id);
+            setOnboarding(false);
+            // Le lien a fait son travail : on l'efface pour qu'il ne redéclenche
+            // pas cet écran à la prochaine ouverture (fermer/rouvrir l'app, etc.)
+            try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
+            setCodeInvitation(null);
+          }} />
+        )}
+
+        {onboarding && !codeInvitation && (
           <Onboarding genre={genre} setGenre={setGenre} onFinish={() => { setOnboarding(false); if (pinCode) setVerrouille(true); }} startSlide={onboardingSlide}
             onCreerPremiereRelation={(nom, type) => {
               const id = "rel" + Date.now();
               const emojis = { coparent: "🧑🏻", famille: "🏡", couple: "❤️", travail: "💼", ami: "🌿" };
               setRelations([{ id, nom: nom || "Nouvelle relation", type, tel: "", emoji: emojis[type] || "🌸", messages: [], depenses: [], solde: "Rien à régler pour l'instant", agenda: [], docs: [], enfants: [], notesPassage: [], photos: [], albums: [], listes: [], groupesTaches: [], notifPrefs: { actives: true, jours: ["L", "M", "M", "J", "V", "S", "D"], debut: "08:00", fin: "21:00" }, journal: [], journalSecret: [], alerte: false, questionnaire: { type } }]);
               setRelId(id);
-            }}
-            onUtiliserDemo={() => {}}
-            codeInvitation={codeInvitation}
-            onRejoindreInvitation={({ relationId, nomAutre, type }) => {
-              const id = "rel" + Date.now();
-              const emojis = { coparent: "🧑🏻", famille: "🏡", couple: "❤️", travail: "💼", ami: "🌿" };
-              setRelations([{ id, relationId, nom: nomAutre || "Ma relation", type: type || "coparent", tel: "", emoji: emojis[type] || "🌸", messages: [], depenses: [], solde: "Rien à régler pour l'instant", agenda: [], docs: [], enfants: [], notesPassage: [], photos: [], albums: [], listes: [], groupesTaches: [], notifPrefs: { actives: true, jours: ["L", "M", "M", "J", "V", "S", "D"], debut: "08:00", fin: "21:00" }, journal: [], journalSecret: [], alerte: false, questionnaire: { type } }]);
-              setRelId(id);
             }} />
         )}
+
 
         {/* ---------- Verrouillage de l'app ---------- */}
         {!onboarding && verrouille && (
