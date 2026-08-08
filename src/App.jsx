@@ -1263,7 +1263,7 @@ function catsEvenement(type, aDesEnfants) {
 }
 
 /* ---- Agenda : vraie navigation mois par mois ---- */
-function AgendaView({ events, estCoparent, partenaire, dateSel, setDateSel, onAdd, onSelectEvent, enfants, onOpenGarde }) {
+function AgendaView({ events, estCoparent, partenaire, dateSel, setDateSel, onAdd, onSelectEvent, enfants, onOpenGarde, evenementsVus }) {
   const today = new Date();
   const AUJ = isoJour(today.getFullYear(), today.getMonth(), today.getDate());
   const sel = parseISO(dateSel);
@@ -1285,8 +1285,9 @@ function AgendaView({ events, estCoparent, partenaire, dateSel, setDateSel, onAd
 
   const ligneEvent = (e, i) => {
     const attente = e.statut === "attente";
+    const aConfirmer = attente && e.proposePar === "autre" && !(evenementsVus || []).includes(e.id);
     return (
-      <button key={e.id} onClick={() => onSelectEvent(e)} style={{ width: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "stretch", gap: 11, padding: "12px 2px", borderTop: i > 0 ? `1px solid ${C.grey}` : "none" }}>
+      <button key={e.id} onClick={() => onSelectEvent(e)} style={{ width: "100%", textAlign: "left", background: aConfirmer ? "#F6ECD9" : "none", border: "none", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "stretch", gap: 11, padding: "12px 10px", margin: aConfirmer ? "2px 0" : 0, borderRadius: aConfirmer ? 14 : 0, borderTop: (!aConfirmer && i > 0) ? `1px solid ${C.grey}` : "none" }}>
         <div style={{ width: 3.5, borderRadius: 999, background: toneC[e.tone], flexShrink: 0, opacity: attente ? 0.5 : 1 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: C.ink, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.titre}</div>
@@ -3147,12 +3148,15 @@ export default function TamiseApp() {
   const tachesEnAttente = relations.reduce((n, r) => n + (r.groupesTaches || []).reduce((m, g) => m + (g.taches || []).filter((t) => t.confirmation === "attente" && t.proposePar === "autre").length, 0), 0);
   const badges = { messages: messagesNonVus, agenda: agendaEnAttente, depenses: depensesEnAttente, plus: tachesEnAttente };
 
-  // Marque les messages de la relation active comme vus dès qu'on ouvre l'onglet Messages.
+  // Marque les messages comme vus en QUITTANT l'onglet Messages (ou en changeant
+  // de relation) plutôt qu'en l'ouvrant — pour que la mise en évidence des
+  // nouveaux messages reste visible le temps de les lire, pas juste un instant.
   useEffect(() => {
-    if (tab === "messages" && rel.id !== "vide" && (rel.messages || []).length > (rel.dernierVu || 0)) {
-      patchRel({ dernierVu: rel.messages.length });
-    }
-  }, [tab, relId, rel.messages && rel.messages.length]);
+    const relIdAuMoment = relId;
+    return () => {
+      setRelations((rs) => rs.map((r) => (r.id === relIdAuMoment && (r.messages || []).length > (r.dernierVu || 0)) ? { ...r, dernierVu: r.messages.length } : r));
+    };
+  }, [tab, relId]);
 
   // Badge natif sur l'icône de l'application, quand le téléphone le permet
   // (application installée sur l'écran d'accueil). Ignoré silencieusement
@@ -3168,6 +3172,7 @@ export default function TamiseApp() {
   const partenaire = rel.nom;
   const estCoparent = rel.type === "coparent";
   const messages = rel.messages;
+  const idsMessagesNonLus = new Set(messages.slice(rel.dernierVu || 0).filter((m) => m.de === "autre").map((m) => m.id));
   const depenses = rel.depenses;
   const agenda = rel.agenda;
   const docs = rel.docs;
@@ -3884,6 +3889,7 @@ export default function TamiseApp() {
                   );
                 }
                 const estMoi = m.de === "moi";
+                const nonLu = !estMoi && idsMessagesNonLus.has(m.id);
                 // Chacun voit toujours ce qu'il a écrit ; l'autre voit la version transmise.
                 const texteAffiche = estMoi
                   ? (vueDestinataire ? m.texteEnvoye : m.texteOriginal)
@@ -3898,7 +3904,7 @@ export default function TamiseApp() {
                 return (
                   <div key={m.id} className="voile" style={{ display: "flex", justifyContent: estMoi ? "flex-end" : "flex-start", marginBottom: 12 }}>
                     <div style={{ maxWidth: "82%" }}>
-                      <div style={{ position: "relative", background: estMoi ? (vueDestinataire ? C.card : C.beigeSoft) : C.card, color: C.ink, borderRadius: estMoi ? "20px 20px 6px 20px" : "20px 20px 20px 6px", padding: aDetections && !vueDestinataire ? "12px 34px 12px 15px" : "12px 15px", fontSize: 14.5, lineHeight: 1.5, boxShadow: "0 4px 14px rgba(69,62,54,0.05)", borderLeft: !estMoi && lisere ? `3px solid ${lisere}` : undefined, borderRight: estMoi && lisere ? `3px solid ${lisere}` : undefined }}>
+                      <div style={{ position: "relative", background: estMoi ? (vueDestinataire ? C.card : C.beigeSoft) : (nonLu ? "#F6ECD9" : C.card), color: C.ink, borderRadius: estMoi ? "20px 20px 6px 20px" : "20px 20px 20px 6px", padding: aDetections && !vueDestinataire ? "12px 34px 12px 15px" : "12px 15px", fontSize: 14.5, lineHeight: 1.5, boxShadow: "0 4px 14px rgba(69,62,54,0.05)", borderLeft: !estMoi && lisere ? `3px solid ${lisere}` : undefined, borderRight: estMoi && lisere ? `3px solid ${lisere}` : undefined }}>
                         {estMoi && !vueDestinataire && poussoir ? <TexteSurligne m={m} /> : texteAffiche}
                         {/* Bouton poussoir en haut à droite du message envoyé */}
                         {aDetections && !vueDestinataire && (
@@ -3950,7 +3956,7 @@ export default function TamiseApp() {
 
           {/* ===== AGENDA ===== */}
           {tab === "agenda" && (
-            <AgendaView events={agenda} estCoparent={estCoparent} partenaire={partenaire} dateSel={dateSel} setDateSel={setDateSel} onAdd={() => { setEventEdit(null); setAjoutEvent(true); }} onSelectEvent={(e) => setEventOuvert(e)} enfants={enfants} onOpenGarde={() => { setTab("plus"); setPlusVue("enfants"); }} />
+            <AgendaView events={agenda} estCoparent={estCoparent} partenaire={partenaire} dateSel={dateSel} setDateSel={setDateSel} onAdd={() => { setEventEdit(null); setAjoutEvent(true); }} onSelectEvent={(e) => { setEventOuvert(e); if (!(rel.evenementsVus || []).includes(e.id)) patchRel({ evenementsVus: [...(rel.evenementsVus || []), e.id] }); }} enfants={enfants} onOpenGarde={() => { setTab("plus"); setPlusVue("enfants"); }} evenementsVus={rel.evenementsVus || []} />
           )}
 
           {/* ===== COACH ===== */}
@@ -3989,9 +3995,10 @@ export default function TamiseApp() {
               {depenses.filter((d) => d.validation !== "refuse").map((d) => {
                 const regle = d.statut === "regle";
                 const enAttenteValidation = d.validation === "attente";
+                const aConfirmer = enAttenteValidation && d.proposePar === "autre" && !(rel.depensesVues || []).includes(d.id);
                 return (
-                  <Card key={d.id} style={{ marginBottom: 10 }}>
-                    <button onClick={() => { setDepenseEdit(d); setAjoutDepense(true); }} style={{ width: "100%", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left", padding: 0, display: "flex", alignItems: "center", gap: 12 }}>
+                  <Card key={d.id} style={{ marginBottom: 10, ...(aConfirmer ? { background: "#F6ECD9", boxShadow: "none" } : {}) }}>
+                    <button onClick={() => { setDepenseEdit(d); setAjoutDepense(true); if (!(rel.depensesVues || []).includes(d.id)) patchRel({ depensesVues: [...(rel.depensesVues || []), d.id] }); }} style={{ width: "100%", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left", padding: 0, display: "flex", alignItems: "center", gap: 12 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 14.5, fontWeight: 700, color: C.ink }}>{d.nom}</div>
                         <div style={{ marginTop: 5, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
