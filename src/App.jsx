@@ -306,24 +306,28 @@ function detecterContradictionLocale(texte, rel) {
 
 /** Vérifie qu'un texte court (intitulé de dépense, nom de tâche) correspond
  * bien à ce qu'on attend, et n'est pas une insulte ou un message détourné.
+ * Trois issues possibles : valide, invalide (refusé), ou ambigu (une question
+ * est posée pour préciser — la personne peut choisir de ne pas répondre).
  * Volontairement séparée de l'analyse des messages : ici on ne reformule
- * rien, on accepte ou on refuse, avec une explication brève. */
+ * rien. */
 async function validerTexteLibre(texte, quoi) {
   try {
     const prompt =
-      "Un texte court va être enregistré comme " + quoi + " dans une application de coparentalité. " +
+      "Un texte court va être enregistré comme " + quoi + " dans une application. " +
       "Vérifie qu'il s'agit bien d'un " + quoi + " plausible et neutre — pas une insulte, une menace, un message personnel détourné, ou un non-sens sans rapport. " +
       "Un intitulé bref, même vague ou mal orthographié, reste valide s'il pourrait raisonnablement être un " + quoi + " (ex. \"cantine\", \"chaussures foot\", \"rdv dentiste\"). " +
-      "Réponds UNIQUEMENT en JSON strict, sans backticks : {\"valide\": true ou false, \"raison\": \"1 phrase courte et douce si invalide, sinon null\"}. " +
+      "Si le texte est un mot ambigu qui pourrait désigner soit quelque chose de tout à fait normal, soit quelque chose de très différent selon le sens (ex. argot, mot à plusieurs sens), ne tranche pas au hasard : marque-le \"ambigu\" et pose une question courte pour lever le doute, plutôt que d'accepter ou de refuser à l'aveugle. " +
+      "Réponds UNIQUEMENT en JSON strict, sans backticks : {\"etat\": \"valide\" ou \"invalide\" ou \"ambigu\", \"raison\": \"1 phrase courte et douce si invalide, sinon null\", \"question\": \"1 question courte si ambigu, sinon null\"}. " +
       "Texte : " + JSON.stringify(texte);
     const rep = await appellerIA(prompt, 150);
     const res = JSON.parse(rep.replace(/```json|```/g, "").trim());
-    return { valide: res.valide !== false, raison: res.raison || null };
+    const etat = res.etat === "invalide" ? "invalide" : res.etat === "ambigu" ? "ambigu" : "valide";
+    return { etat, raison: res.raison || null, question: res.question || null };
   } catch (e) {
     // Si la vérification échoue (hors ligne, IA indisponible), on n'empêche
     // jamais quelqu'un d'enregistrer une vraie dépense ou tâche à cause d'un
     // problème technique — on laisse passer.
-    return { valide: true, raison: null };
+    return { etat: "valide", raison: null, question: null };
   }
 }
 
@@ -334,8 +338,21 @@ async function analyseAvecIA(text, rel) {
       ". DÉPENSES RÉGLÉES : " + (deps.map((d) => d.id + " — " + d.nom + ", " + d.montant + "€, réglée le " + d.regleLe).join(" ; ") || "aucune") +
       ". TÂCHES FAITES : " + (tachesFaites.map((t) => t.id + " — " + t.nom + " (liste : " + t.liste + ")").join(" ; ") || "aucune") +
       ". TÂCHES PAS ENCORE FAITES : " + (tachesEnAttente.map((t) => t.id + " — " + t.nom + " (liste : " + t.liste + ")").join(" ; ") || "aucune") + ".";
+    // Le type de relation vient de rel.type, jamais supposé "coparent" par défaut —
+    // le sujet des enfants ne doit apparaître que si la relation en comporte vraiment.
+    const LABELS_TYPE = { coparent: "coparentalité", couple: "un couple", famille: "de la famille", travail: "des collègues", ami: "des amis" };
+    const typeTxt = LABELS_TYPE[rel && rel.type] || "une relation";
+    const aEnfants = !!(rel && rel.enfants && rel.enfants.length > 0);
+    const q = rel && rel.questionnaire;
+    const questionnaireTxt = q && q.reponses && q.reponses.length
+      ? " Ce que les deux personnes ont déjà partagé sur leur relation, via un court questionnaire — À RESPECTER STRICTEMENT, ne contredis jamais ces faits : " +
+        q.reponses.map((r) => r.q + " → " + r.r).join(" ; ") + "."
+      : "";
     const prompt =
-            "Tu es le moteur d'analyse de Tamisé, une messagerie médiée entre deux co-parents (ou toute relation tendue). Analyse ce que la personne s'apprête à ENVOYER. " +
+            "Tu es le moteur d'analyse de Tamisé, une messagerie médiée pour une relation tendue de type « " + typeTxt + " » (pas forcément une coparentalité — n'évoque JAMAIS d'enfants, de garde ou de pension si ce n'est pas le sujet réel de cette relation). " +
+            (aEnfants ? "Il y a des enfants dans cette relation. " : "IMPORTANT : il n'y a PAS d'enfants dans cette relation — ne mentionne jamais d'enfant, de garde ou d'école dans tes explications, même par réflexe ou par habitude. ") +
+            questionnaireTxt +
+            " Analyse ce que la personne s'apprête à ENVOYER. " +
             "Réponds UNIQUEMENT en JSON strict, sans backticks : " +
             '{"niveau": "sain" | "problematique" | "grave" | "invalide", ' +
             '"reformulation": "version CNV respectueuse (null si grave, sain ou invalide) — proche du besoin réel de la personne, jamais un reproche déguisé en phrase polie : pas de sous-entendu, pas de sarcasme voilé, pas de ton passif-agressif sous couvert de gentillesse", ' +
@@ -1438,17 +1455,30 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
   const [cat, setCat] = useState(ed ? (CATS.find((c) => c[0] === ed.cat) || CATS[0]) : CATS[0]);
   const [verification, setVerification] = useState(false);
   const [erreurContenu, setErreurContenu] = useState(null);
+  const [questionAmbigue, setQuestionAmbigue] = useState(null);
+  const [reponseAmbigue, setReponseAmbigue] = useState("");
   const m = parseFloat((montant || "").replace(",", "."));
   const ok = nom.trim() && m > 0;
   const etaitConfirmee = ed && ed.validation === "confirme";
+  function creer(nomFinal) {
+    onCreate({ nom: (nomFinal || nom).trim(), montant: m, cat: cat[0], payePar, info: ed ? ed.info : "Dépense ajoutée manuellement. Le partage par défaut est 50/50 ; ajuste selon ton jugement ou votre accord. Informations indicatives." });
+  }
   async function valider() {
     if (!ok) return;
     setErreurContenu(null);
+    setQuestionAmbigue(null);
     setVerification(true);
-    const { valide, raison } = await validerTexteLibre(nom.trim(), "intitulé de dépense");
+    const { etat, raison, question } = await validerTexteLibre(nom.trim(), "intitulé de dépense");
     setVerification(false);
-    if (!valide) { setErreurContenu(raison || "Cet intitulé ne correspond pas à une dépense."); return; }
-    onCreate({ nom: nom.trim(), montant: m, cat: cat[0], payePar, info: ed ? ed.info : "Dépense ajoutée manuellement. Le partage par défaut est 50/50 ; ajuste selon ton jugement ou votre accord. Informations indicatives." });
+    if (etat === "invalide") { setErreurContenu(raison || "Cet intitulé ne correspond pas à une dépense."); return; }
+    if (etat === "ambigu" && question) { setQuestionAmbigue(question); return; }
+    creer();
+  }
+  // Une fois la précision donnée (ou volontairement ignorée), on enregistre —
+  // en glissant la précision dans l'intitulé si elle a été donnée, pour que
+  // ce soit gardé quelque part.
+  function validerApresPrecision(ignorer) {
+    creer(ignorer || !reponseAmbigue.trim() ? nom : nom.trim() + " (" + reponseAmbigue.trim() + ")");
   }
   return (
     <>
@@ -1481,6 +1511,21 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
         </div>
       )}
 
+      {questionAmbigue && (
+        <div style={{ background: "#F6ECD9", borderRadius: 14, padding: "13px 14px", marginBottom: 14 }}>
+          <div style={{ display: "flex", gap: 9, alignItems: "flex-start", marginBottom: 10 }}>
+            <HelpCircle size={15} color="#B07D2E" style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ fontSize: 12.5, color: "#8a6320", lineHeight: 1.5 }}>{questionAmbigue}</div>
+          </div>
+          <input value={reponseAmbigue} onChange={(e) => setReponseAmbigue(e.target.value)} placeholder="Ta réponse (facultatif)…"
+            style={{ width: "100%", boxSizing: "border-box", border: "1.5px solid rgba(176,125,46,0.3)", outline: "none", background: C.card, borderRadius: 12, padding: "10px 13px", fontSize: 13.5, fontFamily: "inherit", color: C.ink, marginBottom: 10 }} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => validerApresPrecision(true)} style={{ flex: 1, border: `1.5px solid ${C.grey}`, cursor: "pointer", background: "transparent", color: C.inkSoft, borderRadius: 12, padding: "10px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>Préférer ne pas répondre</button>
+            <button onClick={() => validerApresPrecision(false)} style={{ flex: 1, border: "none", cursor: "pointer", background: "#B07D2E", color: "#fff", borderRadius: 12, padding: "10px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>Valider</button>
+          </div>
+        </div>
+      )}
+
       {erreurContenu && (
         <div style={{ background: C.brickBg, borderRadius: 14, padding: "11px 13px", marginBottom: 14, display: "flex", gap: 9, alignItems: "flex-start" }}>
           <AlertTriangle size={15} color={C.brick} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -1488,10 +1533,12 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
         </div>
       )}
 
+      {!questionAmbigue && (
       <button onClick={valider} disabled={!ok || verification} style={{ width: "100%", border: "none", cursor: ok && !verification ? "pointer" : "default", background: ok && !verification ? C.taupe : C.grey, color: ok && !verification ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
         {verification && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
         {ed ? "Enregistrer les modifications" : "Ajouter la dépense"}
       </button>
+      )}
       {ed && onDelete && (
         <button onClick={onDelete} style={{ width: "100%", marginTop: 10, border: `1.5px solid ${C.grey}`, cursor: "pointer", background: C.card, color: C.brick, borderRadius: 16, padding: "13px", fontSize: 14, fontWeight: 700, fontFamily: "inherit" }}>Supprimer la dépense</button>
       )}
@@ -2004,14 +2051,24 @@ function TacheSheet({ tache, onSave, onDelete, onClose }) {
   const [echeance, setEcheance] = useState(tache ? (tache.echeance || "") : "");
   const [verification, setVerification] = useState(false);
   const [erreurContenu, setErreurContenu] = useState(null);
+  const [questionAmbigue, setQuestionAmbigue] = useState(null);
+  const [reponseAmbigue, setReponseAmbigue] = useState("");
+  function creer(nomFinal) {
+    onSave({ nom: (nomFinal || nom).trim(), statut, priorite, echeance: echeance || null });
+  }
   async function valider() {
     if (!nom.trim()) return;
     setErreurContenu(null);
+    setQuestionAmbigue(null);
     setVerification(true);
-    const { valide, raison } = await validerTexteLibre(nom.trim(), "nom de tâche");
+    const { etat, raison, question } = await validerTexteLibre(nom.trim(), "nom de tâche");
     setVerification(false);
-    if (!valide) { setErreurContenu(raison || "Ce texte ne correspond pas à une tâche."); return; }
-    onSave({ nom: nom.trim(), statut, priorite, echeance: echeance || null });
+    if (etat === "invalide") { setErreurContenu(raison || "Ce texte ne correspond pas à une tâche."); return; }
+    if (etat === "ambigu" && question) { setQuestionAmbigue(question); return; }
+    creer();
+  }
+  function validerApresPrecision(ignorer) {
+    creer(ignorer || !reponseAmbigue.trim() ? nom : nom.trim() + " (" + reponseAmbigue.trim() + ")");
   }
   return (
     <>
@@ -2039,6 +2096,21 @@ function TacheSheet({ tache, onSave, onDelete, onClose }) {
       <input type="date" value={echeance} onChange={(e) => setEcheance(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: C.ink, marginBottom: 8 }} />
       <p style={{ fontSize: 11, color: C.inkSoft, lineHeight: 1.5, marginBottom: 16 }}>Une échéance posée ici apparaît automatiquement dans l'agenda partagé.</p>
 
+      {questionAmbigue && (
+        <div style={{ background: "#F6ECD9", borderRadius: 14, padding: "13px 14px", marginBottom: 14 }}>
+          <div style={{ display: "flex", gap: 9, alignItems: "flex-start", marginBottom: 10 }}>
+            <HelpCircle size={15} color="#B07D2E" style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ fontSize: 12.5, color: "#8a6320", lineHeight: 1.5 }}>{questionAmbigue}</div>
+          </div>
+          <input value={reponseAmbigue} onChange={(e) => setReponseAmbigue(e.target.value)} placeholder="Ta réponse (facultatif)…"
+            style={{ width: "100%", boxSizing: "border-box", border: "1.5px solid rgba(176,125,46,0.3)", outline: "none", background: C.card, borderRadius: 12, padding: "10px 13px", fontSize: 13.5, fontFamily: "inherit", color: C.ink, marginBottom: 10 }} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => validerApresPrecision(true)} style={{ flex: 1, border: `1.5px solid ${C.grey}`, cursor: "pointer", background: "transparent", color: C.inkSoft, borderRadius: 12, padding: "10px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>Préférer ne pas répondre</button>
+            <button onClick={() => validerApresPrecision(false)} style={{ flex: 1, border: "none", cursor: "pointer", background: "#B07D2E", color: "#fff", borderRadius: 12, padding: "10px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>Valider</button>
+          </div>
+        </div>
+      )}
+
       {erreurContenu && (
         <div style={{ background: C.brickBg, borderRadius: 14, padding: "11px 13px", marginBottom: 14, display: "flex", gap: 9, alignItems: "flex-start" }}>
           <AlertTriangle size={15} color={C.brick} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -2046,10 +2118,12 @@ function TacheSheet({ tache, onSave, onDelete, onClose }) {
         </div>
       )}
 
+      {!questionAmbigue && (
       <button onClick={valider} disabled={!nom.trim() || verification} style={{ width: "100%", border: "none", cursor: nom.trim() && !verification ? "pointer" : "default", background: nom.trim() && !verification ? C.taupe : C.grey, color: nom.trim() && !verification ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", marginBottom: tache ? 10 : 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
         {verification && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
         {tache ? "Enregistrer" : "Ajouter la tâche"}
       </button>
+      )}
       {tache && onDelete && (
         <button onClick={onDelete} style={{ width: "100%", border: `1.5px solid ${C.grey}`, cursor: "pointer", background: C.card, color: C.brick, borderRadius: 16, padding: "13px", fontSize: 14, fontWeight: 700, fontFamily: "inherit" }}>Supprimer la tâche</button>
       )}
@@ -3203,6 +3277,15 @@ export default function TamiseApp() {
         "Réponds UNIQUEMENT avec le message reformulé, à la première personne, tutoiement, rien d'autre autour.";
       const texte = (await appellerIA(prompt, 300)).trim();
       pushRel("messages", { id: Date.now(), de: "moi", heure, date, texteOriginal: g.texte, texteEnvoye: texte, niveau: "sain", detections: [] });
+      // "messages" n'est pas synchronisé automatiquement comme les autres
+      // champs (dépenses, agenda…) : sans cet envoi explicite, la reformulation
+      // restait uniquement locale et ne partait jamais vers l'autre téléphone.
+      // Seul le texte reformulé part — jamais le message original menaçant.
+      if (rel.relationId) {
+        envoyerElementServeur(rel.relationId, "message", MON_APPAREIL, {
+          texte, filtre: true, niveau: "sain", heure, date,
+        }).catch(() => {});
+      }
     } catch (e) {
       // Repli minimal si l'IA est indisponible : on ne fabrique jamais un texte
       // précis en son nom, on l'invite à réessayer ou à l'écrire elle-même.
