@@ -185,11 +185,11 @@ function lireCodeInvitation() {
     return c ? c.trim().toUpperCase() : null;
   } catch (e) { return null; }
 }
-async function creerRelationServeur(nom, type) {
+async function creerRelationServeur(nom, type, monNom) {
   const r = await fetch(BACKEND_URL + "/api/relations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nom, type }),
+    body: JSON.stringify({ nom, type, monNom }),
   });
   if (!r.ok) throw new Error("creation");
   return r.json(); // { relationId, code }
@@ -304,6 +304,29 @@ function detecterContradictionLocale(texte, rel) {
   return null;
 }
 
+/** Vérifie qu'un texte court (intitulé de dépense, nom de tâche) correspond
+ * bien à ce qu'on attend, et n'est pas une insulte ou un message détourné.
+ * Volontairement séparée de l'analyse des messages : ici on ne reformule
+ * rien, on accepte ou on refuse, avec une explication brève. */
+async function validerTexteLibre(texte, quoi) {
+  try {
+    const prompt =
+      "Un texte court va être enregistré comme " + quoi + " dans une application de coparentalité. " +
+      "Vérifie qu'il s'agit bien d'un " + quoi + " plausible et neutre — pas une insulte, une menace, un message personnel détourné, ou un non-sens sans rapport. " +
+      "Un intitulé bref, même vague ou mal orthographié, reste valide s'il pourrait raisonnablement être un " + quoi + " (ex. \"cantine\", \"chaussures foot\", \"rdv dentiste\"). " +
+      "Réponds UNIQUEMENT en JSON strict, sans backticks : {\"valide\": true ou false, \"raison\": \"1 phrase courte et douce si invalide, sinon null\"}. " +
+      "Texte : " + JSON.stringify(texte);
+    const rep = await appellerIA(prompt, 150);
+    const res = JSON.parse(rep.replace(/```json|```/g, "").trim());
+    return { valide: res.valide !== false, raison: res.raison || null };
+  } catch (e) {
+    // Si la vérification échoue (hors ligne, IA indisponible), on n'empêche
+    // jamais quelqu'un d'enregistrer une vraie dépense ou tâche à cause d'un
+    // problème technique — on laisse passer.
+    return { valide: true, raison: null };
+  }
+}
+
 async function analyseAvecIA(text, rel) {
   try {
     const { evs, deps, tachesFaites, tachesEnAttente } = faitsConfirmes(rel || {});
@@ -323,7 +346,7 @@ async function analyseAvecIA(text, rel) {
             "CAS PARTICULIER — texte incompréhensible : si ce n'est pas un vrai message (lettres au hasard, texte vide, inintelligible), renvoie niveau \"invalide\", detections [], reformulation null. " +
             "DISTINCTION CRUCIALE ENTRE « problematique » ET « grave » — ne pas confondre : " +
             "« problematique » = la GRANDE majorité des messages contenant un mécanisme de manipulation (culpabilisation, généralisation, reproche, dévalorisation, chantage affectif, présupposé, etc.). ILS SONT REFORMULÉS, PAS BLOQUÉS : la personne peut dire ce qu'elle veut dire, juste autrement. Un reproche dur, une généralisation (\"tu ne fais jamais…\"), une accusation, un ton agressif ou blessant restent « problematique », PAS « grave ». " +
-            "« grave » = RÉSERVÉ EXCLUSIVEMENT à une menace explicite ou très clairement implicite envers une personne (violence physique, faire du mal, \"tu vas le regretter\", intimidation sérieuse) ou un contenu illégal. Le seul fait qu'un message soit dur, injuste, culpabilisant, généralisant ou blessant NE SUFFIT JAMAIS à en faire un message « grave ». En cas de doute entre les deux, choisis toujours « problematique ». " +
+            "« grave » = RÉSERVÉ EXCLUSIVEMENT à une menace explicite ou très clairement implicite envers une personne (violence physique, faire du mal, \"tu vas le regretter\", intimidation sérieuse) ou un contenu illégal. Le seul fait qu'un message soit dur, injuste, culpabilisant, généralisant ou blessant NE SUFFIT JAMAIS à en faire un message « grave ». UNE INSULTE, UNE GROSSIÈRETÉ OU UNE VULGARITÉ SEULE, SANS MENACE, N'EST JAMAIS « grave » — c'est « problematique », et ça se reformule normalement (le passage insultant est simplement retiré ou adouci dans la reformulation). En cas de doute entre les deux, choisis toujours « problematique ». " +
             "« grave » = menace, intimidation, contenu illégal : jamais reformulé, jamais transmis. " +
             "MÉCANISMES À DÉTECTER (choisis le plus précis, une carte par mécanisme distinct, une même phrase peut en contenir plusieurs ; utilise EXACTEMENT ces noms, ils correspondent aux fiches du glossaire de l'app) : " +
             "· Manipulation émotionnelle — Culpabilisation (faire porter la faute), Chantage affectif (conditionner son amour/sa présence), Menace, Honte, Victimisation, Flatterie intéressée, Future faking (promesses d'avenir non tenues). " +
@@ -853,6 +876,7 @@ function JumelageSheet({ nom, type, onRelie, onClose }) {
   const [erreur, setErreur] = useState(null);
   const [chargement, setChargement] = useState(false);
   const [copie, setCopie] = useState(false);
+  const [monNom, setMonNom] = useState("");
 
   // Lien qui ouvre l'application avec le code déjà rempli : la personne invitée
   // n'a plus qu'à cliquer, sans rien recopier à la main.
@@ -869,7 +893,7 @@ function JumelageSheet({ nom, type, onRelie, onClose }) {
   async function inviter() {
     setChargement(true); setErreur(null);
     try {
-      const r = await creerRelationServeur(nom, type);
+      const r = await creerRelationServeur(nom, type, monNom.trim());
       setCode(r.code);
       setRelationId(r.relationId);
       setEtape("code");
@@ -934,7 +958,9 @@ function JumelageSheet({ nom, type, onRelie, onClose }) {
           <p style={{ fontSize: 13, color: C.inkSoft, lineHeight: 1.55, margin: "8px 0 16px" }}>
             Quand {nom || "l'autre personne"} a aussi l'application, chacun écrit librement de son côté : Tamisé adoucit ce qui part, et vous partagez le même agenda, les mêmes dépenses.
           </p>
-          <button onClick={inviter} disabled={chargement} style={{ width: "100%", border: "none", cursor: "pointer", background: C.taupe, color: "#fff", borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          <input value={monNom} onChange={(e) => setMonNom(e.target.value)} placeholder="Ton prénom, pour que la personne invitée sache qui l'invite"
+            style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: C.ink, marginBottom: 12 }} />
+          <button onClick={inviter} disabled={chargement || !monNom.trim()} style={{ width: "100%", border: "none", cursor: monNom.trim() ? "pointer" : "default", background: monNom.trim() ? C.taupe : C.grey, color: monNom.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
             {chargement ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <UserPlus size={16} />}
             Inviter {nom || "cette personne"}
           </button>
@@ -1357,9 +1383,20 @@ function AjoutDepense({ partenaire, depense, onClose, onCreate, onDelete }) {
   const [montant, setMontant] = useState(ed ? String(ed.montant).replace(".", ",") : "");
   const [payePar, setPayePar] = useState(ed ? ed.payePar : "moi");
   const [cat, setCat] = useState(ed ? (CATS.find((c) => c[0] === ed.cat) || CATS[0]) : CATS[0]);
+  const [verification, setVerification] = useState(false);
+  const [erreurContenu, setErreurContenu] = useState(null);
   const m = parseFloat((montant || "").replace(",", "."));
   const ok = nom.trim() && m > 0;
   const etaitConfirmee = ed && ed.validation === "confirme";
+  async function valider() {
+    if (!ok) return;
+    setErreurContenu(null);
+    setVerification(true);
+    const { valide, raison } = await validerTexteLibre(nom.trim(), "intitulé de dépense");
+    setVerification(false);
+    if (!valide) { setErreurContenu(raison || "Cet intitulé ne correspond pas à une dépense."); return; }
+    onCreate({ nom: nom.trim(), montant: m, cat: cat[0], payePar, info: ed ? ed.info : "Dépense ajoutée manuellement. Le partage par défaut est 50/50 ; ajuste selon ton jugement ou votre accord. Informations indicatives." });
+  }
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1391,7 +1428,15 @@ function AjoutDepense({ partenaire, depense, onClose, onCreate, onDelete }) {
         </div>
       )}
 
-      <button onClick={() => ok && onCreate({ nom: nom.trim(), montant: m, cat: cat[0], payePar, info: ed ? ed.info : "Dépense ajoutée manuellement. Le partage par défaut est 50/50 ; ajuste selon ton jugement ou votre accord. Informations indicatives." })} disabled={!ok} style={{ width: "100%", border: "none", cursor: ok ? "pointer" : "default", background: ok ? C.taupe : C.grey, color: ok ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit" }}>
+      {erreurContenu && (
+        <div style={{ background: C.brickBg, borderRadius: 14, padding: "11px 13px", marginBottom: 14, display: "flex", gap: 9, alignItems: "flex-start" }}>
+          <AlertTriangle size={15} color={C.brick} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 12.5, color: C.brick, lineHeight: 1.5 }}>{erreurContenu}</div>
+        </div>
+      )}
+
+      <button onClick={valider} disabled={!ok || verification} style={{ width: "100%", border: "none", cursor: ok && !verification ? "pointer" : "default", background: ok && !verification ? C.taupe : C.grey, color: ok && !verification ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        {verification && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
         {ed ? "Enregistrer les modifications" : "Ajouter la dépense"}
       </button>
       {ed && onDelete && (
@@ -1904,6 +1949,17 @@ function TacheSheet({ tache, onSave, onDelete, onClose }) {
   const [statut, setStatut] = useState(tache ? tache.statut : "pas_commence");
   const [priorite, setPriorite] = useState(tache ? tache.priorite : "medium");
   const [echeance, setEcheance] = useState(tache ? (tache.echeance || "") : "");
+  const [verification, setVerification] = useState(false);
+  const [erreurContenu, setErreurContenu] = useState(null);
+  async function valider() {
+    if (!nom.trim()) return;
+    setErreurContenu(null);
+    setVerification(true);
+    const { valide, raison } = await validerTexteLibre(nom.trim(), "nom de tâche");
+    setVerification(false);
+    if (!valide) { setErreurContenu(raison || "Ce texte ne correspond pas à une tâche."); return; }
+    onSave({ nom: nom.trim(), statut, priorite, echeance: echeance || null });
+  }
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1930,7 +1986,17 @@ function TacheSheet({ tache, onSave, onDelete, onClose }) {
       <input type="date" value={echeance} onChange={(e) => setEcheance(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: C.ink, marginBottom: 8 }} />
       <p style={{ fontSize: 11, color: C.inkSoft, lineHeight: 1.5, marginBottom: 16 }}>Une échéance posée ici apparaît automatiquement dans l'agenda partagé.</p>
 
-      <button onClick={() => nom.trim() && onSave({ nom: nom.trim(), statut, priorite, echeance: echeance || null })} disabled={!nom.trim()} style={{ width: "100%", border: "none", cursor: nom.trim() ? "pointer" : "default", background: nom.trim() ? C.taupe : C.grey, color: nom.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", marginBottom: tache ? 10 : 0 }}>{tache ? "Enregistrer" : "Ajouter la tâche"}</button>
+      {erreurContenu && (
+        <div style={{ background: C.brickBg, borderRadius: 14, padding: "11px 13px", marginBottom: 14, display: "flex", gap: 9, alignItems: "flex-start" }}>
+          <AlertTriangle size={15} color={C.brick} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 12.5, color: C.brick, lineHeight: 1.5 }}>{erreurContenu}</div>
+        </div>
+      )}
+
+      <button onClick={valider} disabled={!nom.trim() || verification} style={{ width: "100%", border: "none", cursor: nom.trim() && !verification ? "pointer" : "default", background: nom.trim() && !verification ? C.taupe : C.grey, color: nom.trim() && !verification ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", marginBottom: tache ? 10 : 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        {verification && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
+        {tache ? "Enregistrer" : "Ajouter la tâche"}
+      </button>
       {tache && onDelete && (
         <button onClick={onDelete} style={{ width: "100%", border: `1.5px solid ${C.grey}`, cursor: "pointer", background: C.card, color: C.brick, borderRadius: 16, padding: "13px", fontSize: 14, fontWeight: 700, fontFamily: "inherit" }}>Supprimer la tâche</button>
       )}
@@ -2619,7 +2685,7 @@ function EcranDiversion({ onRevenir }) {
 }
 
 /* ---- Barre de navigation flottante (style Clue) ---- */
-function BottomNav({ active, onChange }) {
+function BottomNav({ active, onChange, badges = {} }) {
   const items = [
     { key: "messages", label: "Messages", Icon: MessageCircle },
     { key: "agenda", label: "Agenda", Icon: CalendarDays },
@@ -2656,8 +2722,13 @@ function BottomNav({ active, onChange }) {
                 alignItems: "center", gap: 3, cursor: "pointer",
                 color: on ? C.taupe : C.inkSoft, fontFamily: "inherit",
                 transition: "color .3s ease" }}>
-              <Icon size={20} strokeWidth={on ? 2.5 : 2}
-                style={{ transition: "transform .3s ease", transform: on ? "translateY(-1px)" : "none" }} />
+              <span style={{ position: "relative", display: "inline-flex" }}>
+                <Icon size={20} strokeWidth={on ? 2.5 : 2}
+                  style={{ transition: "transform .3s ease", transform: on ? "translateY(-1px)" : "none" }} />
+                {badges[key] > 0 && (
+                  <span style={{ position: "absolute", top: -2, right: -3, width: 8, height: 8, borderRadius: 999, background: C.brick, border: "1.5px solid " + (on ? "#FFFFFF" : "rgba(248,245,242,0.92)") }} />
+                )}
+              </span>
               <span style={{ fontSize: 11, fontWeight: on ? 700 : 500 }}>{label}</span>
             </button>
           );
@@ -2929,6 +3000,43 @@ export default function TamiseApp() {
   const [relId, setRelId] = useState(() => chargerLocal("relId", null));
   const REL_VIDE = { id: "vide", nom: "", type: "coparent", tel: "", emoji: "🌸", messages: [], depenses: [], solde: "Rien à régler pour l'instant", agenda: [], docs: [], enfants: [], notesPassage: [], photos: [], albums: [], listes: [], groupesTaches: [], notifPrefs: { actives: true, jours: ["L", "M", "M", "J", "V", "S", "D"], debut: "08:00", fin: "21:00" }, journal: [], journalSecret: [], alerte: false, questionnaire: null };
   const rel = relations.find((r) => r.id === relId) || relations[0] || REL_VIDE;
+
+  // Messages non encore vus : un message de "autre" est considéré vu dès que
+  // l'onglet Messages de SA relation a été ouvert (voir l'effet plus bas).
+  // On compte par position dans la liste plutôt que par identifiant : les
+  // messages reçus de l'autre téléphone ont un id texte ("srv123"), pas
+  // numérique, une comparaison par id mélangerait les deux.
+  const messagesNonVus = relations.reduce((n, r) => {
+    const vu = r.dernierVu || 0;
+    return n + (r.messages || []).slice(vu).filter((m) => m.de === "autre").length;
+  }, 0);
+  // Agenda / dépenses / tâches en attente d'une confirmation de MA part —
+  // c'est-à-dire proposées par l'autre personne. Pour les tâches, la
+  // confirmation (confirmation: attente/confirme) est distincte de
+  // l'avancement (statut: pas_commence/en_cours/termine).
+  const agendaEnAttente = relations.reduce((n, r) => n + (r.agenda || []).filter((e) => e.statut === "attente" && e.proposePar === "autre").length, 0);
+  const depensesEnAttente = relations.reduce((n, r) => n + (r.depenses || []).filter((d) => d.validation === "attente" && d.proposePar === "autre").length, 0);
+  const tachesEnAttente = relations.reduce((n, r) => n + (r.groupesTaches || []).reduce((m, g) => m + (g.taches || []).filter((t) => t.confirmation === "attente" && t.proposePar === "autre").length, 0), 0);
+  const badges = { messages: messagesNonVus, agenda: agendaEnAttente, depenses: depensesEnAttente, plus: tachesEnAttente };
+
+  // Marque les messages de la relation active comme vus dès qu'on ouvre l'onglet Messages.
+  useEffect(() => {
+    if (tab === "messages" && rel.id !== "vide" && (rel.messages || []).length > (rel.dernierVu || 0)) {
+      patchRel({ dernierVu: rel.messages.length });
+    }
+  }, [tab, relId, rel.messages && rel.messages.length]);
+
+  // Badge natif sur l'icône de l'application, quand le téléphone le permet
+  // (application installée sur l'écran d'accueil). Ignoré silencieusement
+  // ailleurs — ce n'est pas grave si le téléphone ne le prend pas en charge.
+  useEffect(() => {
+    const total = messagesNonVus + agendaEnAttente + depensesEnAttente + tachesEnAttente;
+    try {
+      if (total > 0 && navigator.setAppBadge) navigator.setAppBadge(total).catch(() => {});
+      else if (navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
+    } catch (e) { /* API non disponible sur ce téléphone : sans conséquence */ }
+  }, [messagesNonVus, agendaEnAttente, depensesEnAttente, tachesEnAttente]);
+
   const partenaire = rel.nom;
   const estCoparent = rel.type === "coparent";
   const messages = rel.messages;
@@ -3178,6 +3286,11 @@ export default function TamiseApp() {
           (parChamp[e.type] = parChamp[e.type] || []).push(decoder(e));
         });
 
+        // Modifications d'éléments déjà partagés (confirmer un événement,
+        // cocher une tâche, valider une dépense…) — sans ça, chaque téléphone
+        // voit l'ajout de l'autre mais ne peut jamais y réagir.
+        const modifs = desAutres.filter((e) => e.type === "maj").map(decoder);
+
         setRelations((rs) => rs.map((r) => {
           if (r.id !== relId) return r;
           const maj = { ...r, dernierId };
@@ -3192,6 +3305,25 @@ export default function TamiseApp() {
             const existants = new Set((r[champ] || []).map((x) => x && x.id).filter(Boolean));
             const nouveauxDuChamp = parChamp[champ].filter((x) => !x.id || !existants.has(x.id));
             if (nouveauxDuChamp.length) maj[champ] = [...(r[champ] || []), ...nouveauxDuChamp];
+          });
+
+          modifs.forEach((m) => {
+            if (!m || !m.champ || !m.id) return;
+            if (m.champ === "groupesTaches" && m.sousId) {
+              const groupes = maj.groupesTaches || r.groupesTaches || [];
+              maj.groupesTaches = groupes.map((g) => (g.id === m.id ? { ...g, taches: (g.taches || []).map((t) => (t.id === m.sousId ? { ...t, ...m.patch } : t)) } : g));
+              return;
+            }
+            if (m.champ === "groupesTaches" && m.ajoutTache) {
+              const groupes = maj.groupesTaches || r.groupesTaches || [];
+              const dejaLa = groupes.some((g) => g.id === m.id && (g.taches || []).some((t) => t.id === m.ajoutTache.id));
+              if (!dejaLa) {
+                maj.groupesTaches = groupes.map((g) => (g.id === m.id ? { ...g, taches: [...(g.taches || []), { ...m.ajoutTache, proposePar: "autre" }] } : g));
+              }
+              return;
+            }
+            const liste = maj[m.champ] || r[m.champ] || [];
+            maj[m.champ] = liste.map((x) => (x && x.id === m.id ? { ...x, ...m.patch } : x));
           });
 
           return maj;
@@ -3241,6 +3373,9 @@ export default function TamiseApp() {
   const nbAttente = depenses.filter((d) => d.statut === "attente").length;
   function majDepense(id, patch) {
     setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, depenses: r.depenses.map((d) => (d.id === id ? { ...d, ...patch } : d)) } : r)));
+    if (rel.relationId) {
+      envoyerElementServeur(rel.relationId, "maj", MON_APPAREIL, { champ: "depenses", id, patch }).catch(() => {});
+    }
   }
   function enregistrerDepense(dep) {
     if (depenseEdit) {
@@ -3267,6 +3402,9 @@ export default function TamiseApp() {
   }
   function majEvenement(id, patch) {
     setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, agenda: r.agenda.map((e) => (e.id === id ? { ...e, ...patch } : e)) } : r)));
+    if (rel.relationId) {
+      envoyerElementServeur(rel.relationId, "maj", MON_APPAREIL, { champ: "agenda", id, patch }).catch(() => {});
+    }
   }
   function supprimerEvenement(id) {
     setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, agenda: r.agenda.filter((e) => e.id !== id) } : r)));
@@ -3306,11 +3444,11 @@ export default function TamiseApp() {
     setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, groupesTaches: r.groupesTaches.map((g) => (g.id === id ? { ...g, ouverte: !g.ouverte } : g)) } : r)));
   }
   function ajouterTache(groupeId, tache) {
+    const id = "t" + Date.now();
+    let maj = { id, statut: "pas_commence", priorite: "medium", echeance: null, fichiers: 0, proposePar: "moi", confirmation: "attente", ...tache };
     setRelations((rs) => rs.map((r) => {
       if (r.id !== relId) return r;
       let agenda = r.agenda;
-      const id = "t" + Date.now();
-      let maj = { id, statut: "pas_commence", priorite: "medium", echeance: null, fichiers: 0, ...tache };
       if (maj.echeance) {
         const ev = { id: "ev-" + id, titre: maj.nom, allDay: true, start: maj.echeance, end: maj.echeance, cat: "Tâche", tone: "grey", recurrence: "jamais", alerte: "aucune", statut: "confirme", proposePar: "moi", source: "tache", tacheId: id };
         agenda = [...agenda, ev];
@@ -3318,6 +3456,12 @@ export default function TamiseApp() {
       }
       return { ...r, groupesTaches: r.groupesTaches.map((g) => (g.id === groupeId ? { ...g, taches: [...g.taches, maj] } : g)), agenda };
     }));
+    // L'ajout d'une tâche à un groupe déjà existant est une MODIFICATION du
+    // groupe (pas un nouvel élément de premier niveau) : sans ce message
+    // explicite, l'autre téléphone ne voit jamais la nouvelle tâche.
+    if (rel.relationId) {
+      envoyerElementServeur(rel.relationId, "maj", MON_APPAREIL, { champ: "groupesTaches", id: groupeId, ajoutTache: maj }).catch(() => {});
+    }
   }
   function majTache(groupeId, tacheId, patch) {
     setRelations((rs) => rs.map((r) => {
@@ -3344,6 +3488,9 @@ export default function TamiseApp() {
       });
       return { ...r, groupesTaches, agenda };
     }));
+    if (rel.relationId) {
+      envoyerElementServeur(rel.relationId, "maj", MON_APPAREIL, { champ: "groupesTaches", id: groupeId, sousId: tacheId, patch }).catch(() => {});
+    }
   }
   function supprimerTache(groupeId, tacheId) {
     if (!window.confirm("Supprimer cette tâche ?")) return;
@@ -4049,13 +4196,21 @@ export default function TamiseApp() {
                   {g.ouverte && (
                     <>
                       {g.taches.map((t) => (
-                        <Card key={t.id} onClick={() => setTacheOuverte({ groupeId: g.id, tache: t })} style={{ marginBottom: 8, cursor: "pointer", padding: 13 }}>
+                        <Card key={t.id} onClick={() => setTacheOuverte({ groupeId: g.id, tache: t })} style={{ marginBottom: 8, cursor: "pointer", padding: 13, ...(t.confirmation === "attente" && t.proposePar === "autre" ? { background: "#F6ECD9" } : {}) }}>
                           <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, marginBottom: 8 }}>{t.nom}</div>
                           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                             <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 999, padding: "4px 9px", background: STATUT_TACHE[t.statut].bg, color: STATUT_TACHE[t.statut].fg }}>{STATUT_TACHE[t.statut].label}</span>
                             <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 999, padding: "4px 9px", background: PRIORITE_TACHE[t.priorite].bg, color: "#fff" }}>{PRIORITE_TACHE[t.priorite].label}</span>
                             {t.echeance && <span style={{ fontSize: 10.5, color: C.inkSoft, display: "flex", alignItems: "center", gap: 3 }}><CalendarDays size={11} /> {parseISO(t.echeance).d}/{parseISO(t.echeance).m + 1}</span>}
                           </div>
+                          {t.confirmation === "attente" && t.proposePar === "autre" && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(176,125,46,0.25)" }}>
+                              <span style={{ fontSize: 11, color: "#8a6320", flex: 1, display: "flex", alignItems: "center", gap: 5 }}><Clock size={12} /> Proposée par {partenaire}</span>
+                              <button onClick={(e) => { e.stopPropagation(); majTache(g.id, t.id, { confirmation: "confirme" }); }} style={{ border: "none", cursor: "pointer", background: "#B07D2E", color: "#fff", borderRadius: 999, padding: "6px 12px", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                                Confirmer
+                              </button>
+                            </div>
+                          )}
                         </Card>
                       ))}
                       <button onClick={() => setNouvelleTacheGroupe(g.id)} style={{ width: "100%", border: "none", background: "none", cursor: "pointer", color: C.taupe, fontSize: 12, fontWeight: 700, fontFamily: "inherit", padding: "6px", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
@@ -4312,7 +4467,7 @@ export default function TamiseApp() {
         )}
 
         {/* ---------- Navigation ---------- */}
-        <BottomNav active={tab} onChange={(id) => { setTab(id); setVueDestinataire(false); if (id === "plus") setPlusVue("menu"); }} />
+        <BottomNav active={tab} badges={badges} onChange={(id) => { setTab(id); setVueDestinataire(false); if (id === "plus") setPlusVue("menu"); }} />
 
         {/* ---------- Voile de médiation ---------- */}
         {mediation && (
@@ -4487,7 +4642,10 @@ export default function TamiseApp() {
               onRename={(nom) => { patchRel({ nom }); setGererRelOuvert(false); }}
               onJumeler={() => { setGererRelOuvert(false); setJumelageOuvert(true); }}
               onDelete={() => {
-                if (window.confirm("Supprimer définitivement « " + rel.nom + " » ? Tous ses messages, son agenda, ses dépenses et son journal seront perdus.")) {
+                const avertissement = rel.relationId
+                  ? "Supprimer définitivement « " + rel.nom + " » ? C'est une relation réellement reliée à un autre téléphone : tous les messages échangés, l'agenda, les dépenses et le journal seront perdus pour de bon, des deux côtés."
+                  : "Supprimer définitivement « " + rel.nom + " » ? Tous ses messages, son agenda, ses dépenses et son journal seront perdus.";
+                if (window.confirm(avertissement)) {
                   const autres = relations.filter((r) => r.id !== relId);
                   setRelations(autres);
                   setRelId(autres[0].id);
