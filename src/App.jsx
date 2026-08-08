@@ -346,7 +346,9 @@ async function analyseAvecIA(text, rel) {
             "CAS PARTICULIER — texte incompréhensible : si ce n'est pas un vrai message (lettres au hasard, texte vide, inintelligible), renvoie niveau \"invalide\", detections [], reformulation null. " +
             "DISTINCTION CRUCIALE ENTRE « problematique » ET « grave » — ne pas confondre : " +
             "« problematique » = la GRANDE majorité des messages contenant un mécanisme de manipulation (culpabilisation, généralisation, reproche, dévalorisation, chantage affectif, présupposé, etc.). ILS SONT REFORMULÉS, PAS BLOQUÉS : la personne peut dire ce qu'elle veut dire, juste autrement. Un reproche dur, une généralisation (\"tu ne fais jamais…\"), une accusation, un ton agressif ou blessant restent « problematique », PAS « grave ». " +
-            "« grave » = RÉSERVÉ EXCLUSIVEMENT à une menace explicite ou très clairement implicite envers une personne (violence physique, faire du mal, \"tu vas le regretter\", intimidation sérieuse) ou un contenu illégal. Le seul fait qu'un message soit dur, injuste, culpabilisant, généralisant ou blessant NE SUFFIT JAMAIS à en faire un message « grave ». UNE INSULTE, UNE GROSSIÈRETÉ OU UNE VULGARITÉ SEULE, SANS MENACE, N'EST JAMAIS « grave » — c'est « problematique », et ça se reformule normalement (le passage insultant est simplement retiré ou adouci dans la reformulation). En cas de doute entre les deux, choisis toujours « problematique ». " +
+            "« grave » = RÉSERVÉ EXCLUSIVEMENT à une menace explicite ou très clairement implicite envers une personne (violence physique, faire du mal, \"tu vas le regretter\", intimidation sérieuse) ou un contenu illégal. Le seul fait qu'un message soit dur, injuste, culpabilisant, généralisant ou blessant NE SUFFIT JAMAIS à en faire un message « grave ». UNE INSULTE, UNE GROSSIÈRETÉ OU UNE VULGARITÉ SEULE, SANS MENACE, N'EST JAMAIS « grave » — c'est « problematique », et ça se reformule normalement (le passage insultant est simplement retiré ou adouci dans la reformulation). " +
+            "DISTINCTION CRUCIALE — FAIRE une menace n'est pas PARLER d'une menace : \"grave\" s'applique UNIQUEMENT si la personne qui écrit menace elle-même, ICI, MAINTENANT. Si elle RACONTE, RAPPORTE ou EXPLIQUE une menace ou une insulte qu'elle a REÇUE ou SUBIE (\"tu m'as menacé\", \"tu m'as insulté\", \"j'arrête de te parler parce que tu m'as menacé\", \"tu as dit que tu allais...\"), ce n'est jamais « grave » — c'est elle qui témoigne de ce qu'elle a vécu, elle a parfaitement le droit de le dire, de poser une limite ou de mettre fin à l'échange pour cette raison. Regarde qui est le sujet de la menace : si c'est \"je\"/l'expéditeur qui menace l'autre → potentiellement grave ; si c'est l'expéditeur qui rapporte avoir été menacé par l'autre → jamais grave, c'est un fait qu'elle relate, à reformuler normalement si besoin (ou même à laisser tel quel si c'est déjà factuel et sain). " +
+            "En cas de doute entre les deux, choisis toujours « problematique ». " +
             "« grave » = menace, intimidation, contenu illégal : jamais reformulé, jamais transmis. " +
             "MÉCANISMES À DÉTECTER (choisis le plus précis, une carte par mécanisme distinct, une même phrase peut en contenir plusieurs ; utilise EXACTEMENT ces noms, ils correspondent aux fiches du glossaire de l'app) : " +
             "· Manipulation émotionnelle — Culpabilisation (faire porter la faute), Chantage affectif (conditionner son amour/sa présence), Menace, Honte, Victimisation, Flatterie intéressée, Future faking (promesses d'avenir non tenues). " +
@@ -1230,7 +1232,18 @@ function quiALaGardeTous(enfants, dateISO) {
   return uniques.length === 1 ? uniques[0] : "mixte";
 }
 
-const CATS_EVENT = [["Garde", "beige"], ["Santé", "sage"], ["École", "grey"], ["Activité", "grey"], ["Famille", "brick"], ["Autre", "grey"]];
+// Catégories courtes selon le contexte — "Garde" et "École" n'ont de sens que
+// s'il y a au moins un enfant déclaré, peu importe le type de relation.
+function catsEvenement(type, aDesEnfants) {
+  if (aDesEnfants) return [["Garde", "beige"], ["École", "grey"], ["Santé", "sage"], ["Activité", "grey"], ["Famille", "brick"], ["Autre", "grey"]];
+  const PAR_TYPE = {
+    couple: [["Sortie", "beige"], ["Santé", "sage"], ["Famille", "brick"], ["Autre", "grey"]],
+    travail: [["Réunion", "beige"], ["Déplacement", "sage"], ["Échéance", "grey"], ["Autre", "grey"]],
+    ami: [["Sortie", "beige"], ["Voyage", "sage"], ["Autre", "grey"]],
+    famille: [["Santé", "sage"], ["Famille", "brick"], ["Sortie", "beige"], ["Autre", "grey"]],
+  };
+  return PAR_TYPE[type] || [["Santé", "sage"], ["Activité", "grey"], ["Autre", "grey"]];
+}
 
 /* ---- Agenda : vraie navigation mois par mois ---- */
 function AgendaView({ events, estCoparent, partenaire, dateSel, setDateSel, onAdd, onSelectEvent, enfants, onOpenGarde }) {
@@ -2221,8 +2234,9 @@ function StatsSheet({ agenda, enfants, partenaire, onClose }) {
   );
 }
 
-function AjoutEvenement({ dateDefaut, evenement, onClose, onCreate }) {
+function AjoutEvenement({ dateDefaut, evenement, type, aDesEnfants, onClose, onCreate }) {
   const ed = evenement || null;
+  const CATS_EVENT = catsEvenement(type, aDesEnfants);
   const initStart = ed ? (ed.start.includes("T") ? ed.start.split("T") : [ed.start, "09:00"]) : [dateDefaut, "09:00"];
   const initEnd = ed ? (ed.end && ed.end.includes("T") ? ed.end.split("T") : [ed.end || ed.start, "10:00"]) : [dateDefaut, "10:00"];
   const [titre, setTitre] = useState(ed ? ed.titre : "");
@@ -3731,7 +3745,7 @@ export default function TamiseApp() {
         )}
 
         {/* ---------- Contenu ---------- */}
-        <div ref={contenuRef} style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", paddingTop: tab === "plus" && plusVue === "reperer" ? "calc(env(safe-area-inset-top, 0px) + 18px)" : "calc(env(safe-area-inset-top, 0px) + 6px)", paddingLeft: tab === "plus" && plusVue === "reperer" ? 18 : 16, paddingRight: tab === "plus" && plusVue === "reperer" ? 18 : 16, paddingBottom: "calc(84px + env(safe-area-inset-bottom, 0px))", zoom: tailleTexte, ...(tab === "plus" && plusVue === "menu" ? { display: "flex", flexDirection: "column", minHeight: 0 } : {}) }}>
+        <div ref={contenuRef} style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", paddingTop: tab === "plus" && plusVue === "reperer" ? "calc(env(safe-area-inset-top, 0px) + 18px)" : "calc(env(safe-area-inset-top, 0px) + 6px)", paddingLeft: tab === "plus" && plusVue === "reperer" ? 18 : 16, paddingRight: tab === "plus" && plusVue === "reperer" ? 18 : 16, paddingBottom: (tab === "messages" || tab === "coach") ? "10px" : "calc(84px + env(safe-area-inset-bottom, 0px))", zoom: tailleTexte, ...(tab === "plus" && plusVue === "menu" ? { display: "flex", flexDirection: "column", minHeight: 0 } : {}) }}>
 
           {/* ===== MESSAGES ===== */}
           {tab === "messages" && (
@@ -4778,7 +4792,7 @@ export default function TamiseApp() {
 
         {ajoutEvent && (
           <BottomSheet onClose={() => { setAjoutEvent(false); setEventEdit(null); }}>
-            <AjoutEvenement dateDefaut={dateSel} evenement={eventEdit} onClose={() => { setAjoutEvent(false); setEventEdit(null); }} onCreate={(ev) => {
+            <AjoutEvenement dateDefaut={dateSel} evenement={eventEdit} type={rel.type} aDesEnfants={enfants.length > 0} onClose={() => { setAjoutEvent(false); setEventEdit(null); }} onCreate={(ev) => {
               if (eventEdit) { majEvenement(ev.id, ev); } else { pushRel("agenda", ev); setDateSel(ev.start.split("T")[0]); }
               setAjoutEvent(false); setEventEdit(null);
             }} />
