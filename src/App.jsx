@@ -2826,10 +2826,8 @@ function BottomNav({ active, onChange, badges = {} }) {
   const activeIndex = items.findIndex((i) => i.key === active); // -1 si aucun onglet actif
 
   return (
-    <div style={{ position: "fixed", left: 0, right: 0, zIndex: 30,
-      bottom: "calc(8px + env(safe-area-inset-bottom, 0px))",
-      padding: "0 14px", pointerEvents: "none" }}>
-      <div style={{ position: "relative", display: "flex", pointerEvents: "auto",
+    <div style={{ flexShrink: 0, padding: "8px 14px calc(8px + env(safe-area-inset-bottom, 0px))" }}>
+      <div style={{ position: "relative", display: "flex",
         background: "rgba(248,245,242,0.92)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)",
         borderRadius: 24, padding: 5, border: "1.5px solid rgba(255,255,255,0.95)",
         boxShadow: "0 6px 22px rgba(69,62,54,0.20), 0 1px 3px rgba(69,62,54,0.10)" }}>
@@ -3110,6 +3108,120 @@ function Onboarding({ genre, setGenre, onFinish, onCreerPremiereRelation, startS
 export default function TamiseApp() {
   const [tab, setTab] = useState("messages");
   const contenuRef = useRef(null);
+
+  /* ================================================================
+     Gestion fine du clavier iOS — voir note technique de référence.
+     iOS ne redimensionne pas la page comme prévu : il la décale et/ou
+     réduit la zone visible sans que le CSS seul puisse le détecter à
+     coup sûr. On mesure donc soi-même via window.visualViewport.
+     ================================================================ */
+  const [viewH, setViewH] = useState(null);
+  const [viewTop, setViewTop] = useState(0);
+  const [kbOpen, setKbOpen] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const maxHeightRef = useRef(null);
+  const dernierTopRef = useRef(0);
+  const heightSettleTimerRef = useRef(null);
+  const focusScrollTimerRef = useRef(null);
+  const scrollAnimRef = useRef(null);
+
+  // Anime un défilement soi-même (jamais scrollTo natif : il entre en
+  // concurrence avec le repositionnement automatique du clavier par iOS).
+  function animerDefilement(c, cible, duree = 520) {
+    if (scrollAnimRef.current) cancelAnimationFrame(scrollAnimRef.current);
+    const depart = c.scrollTop;
+    const distance = cible - depart;
+    if (Math.abs(distance) < 1) return;
+    const t0 = performance.now();
+    const adoucir = (t) => 1 - Math.pow(1 - t, 3); // décélération douce
+    const etape = (maintenant) => {
+      const t = Math.min(1, (maintenant - t0) / duree);
+      c.scrollTop = depart + distance * adoucir(t);
+      if (t < 1) scrollAnimRef.current = requestAnimationFrame(etape);
+      else scrollAnimRef.current = null;
+    };
+    scrollAnimRef.current = requestAnimationFrame(etape);
+  }
+
+  // Amène le champ actif à un endroit prévisible de l'écran (jamais
+  // scrollIntoView : il peut faire défiler la page entière au lieu du
+  // conteneur prévu).
+  function amenerChampEnHaut() {
+    const el = document.activeElement;
+    if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
+    const container = contenuRef.current;
+    if (!container || !container.contains(el)) return;
+    clearTimeout(focusScrollTimerRef.current);
+    focusScrollTimerRef.current = setTimeout(() => {
+      const c = contenuRef.current;
+      if (!c || !c.contains(el)) return;
+      if (c.scrollHeight <= c.clientHeight + 1) return; // rien à faire si ça ne défile pas
+      const elRect = el.getBoundingClientRect();
+      const cRect = c.getBoundingClientRect();
+      const MARGE_HAUT = 110; // distance voulue entre le haut de la zone et le champ
+      const delta = elRect.top - (cRect.top + MARGE_HAUT);
+      if (Math.abs(delta) > 4) {
+        const max = c.scrollHeight - c.clientHeight;
+        const cible = Math.max(0, Math.min(max, c.scrollTop + delta));
+        animerDefilement(c, cible);
+      }
+    }, 300); // laisse le clavier finir son animation avant de mesurer
+  }
+
+  // Mesure continue de la zone visible réelle (hauteur + décalage).
+  useEffect(() => {
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    if (!vv) return;
+    const update = () => {
+      clearTimeout(heightSettleTimerRef.current);
+      heightSettleTimerRef.current = setTimeout(() => {
+        if (maxHeightRef.current === null || vv.height > maxHeightRef.current) {
+          maxHeightRef.current = vv.height;
+        }
+        setKbOpen(maxHeightRef.current - vv.height > 120); // seuil empirique
+
+        // Compense immédiatement le glissement de fenêtre d'iOS en ajustant
+        // le scroll interne d'autant, pour éviter un double mouvement avec
+        // l'animation de amenerChampEnHaut.
+        const nouveauTop = vv.offsetTop || 0;
+        const diff = nouveauTop - dernierTopRef.current;
+        if (diff !== 0) {
+          const c = contenuRef.current;
+          if (c && c.scrollHeight > c.clientHeight + 1) c.scrollTop += diff;
+          dernierTopRef.current = nouveauTop;
+        }
+        setViewH(vv.height);
+        setViewTop(nouveauTop);
+        amenerChampEnHaut();
+      }, 60); // regroupe les dizaines d'évènements pendant l'animation du clavier
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update); // "scroll" : seul évènement qui signale offsetTop
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      clearTimeout(heightSettleTimerRef.current);
+      if (scrollAnimRef.current) cancelAnimationFrame(scrollAnimRef.current);
+    };
+  }, []);
+
+  // Second signal, direct : le focus lui-même (plus fiable que la seule
+  // mesure de hauteur dans certains contextes d'affichage).
+  useEffect(() => {
+    const isField = (el) => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+    const onFocusIn = (e) => { if (isField(e.target)) { setTyping(true); amenerChampEnHaut(); } };
+    const onFocusOut = () => {
+      // Différé : lors du passage d'un champ à un autre, le focus sort du
+      // premier avant d'entrer dans le second — sans ce délai, la barre
+      // réapparaîtrait une fraction de seconde entre les deux.
+      setTimeout(() => setTyping(isField(document.activeElement)), 60);
+    };
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+    return () => { document.removeEventListener("focusin", onFocusIn); document.removeEventListener("focusout", onFocusOut); };
+  }, []);
+
   const [plusVue, setPlusVue] = useState("menu"); // menu | docs | journal | reglages | secret
   // Chaque onglet démarre en haut de page — sans ça, il garde la position de
   // défilement laissée par l'onglet précédent (ex. après avoir lu une longue
@@ -3698,7 +3810,7 @@ export default function TamiseApp() {
   };
 
   return (
-    <div style={{ height: "100dvh", width: "100%", boxSizing: "border-box", ...BG_LAYERED, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "none", position: "relative", fontFamily: "'Karla', sans-serif" }}>
+    <div style={{ height: viewH ? viewH + "px" : "100dvh", width: "100%", boxSizing: "border-box", ...BG_LAYERED, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "none", position: "relative", fontFamily: "'Karla', sans-serif", transform: viewTop ? `translateY(${viewTop}px)` : undefined }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Karla:wght@400;600;700&display=swap');
         @keyframes voile { 0%{opacity:0; transform:translateY(8px)} 100%{opacity:1; transform:translateY(0)} }
@@ -3833,7 +3945,7 @@ export default function TamiseApp() {
         )}
 
         {/* ---------- Contenu ---------- */}
-        <div ref={contenuRef} style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", paddingTop: tab === "plus" && plusVue === "reperer" ? "calc(env(safe-area-inset-top, 0px) + 18px)" : "calc(env(safe-area-inset-top, 0px) + 6px)", paddingLeft: tab === "plus" && plusVue === "reperer" ? 18 : 16, paddingRight: tab === "plus" && plusVue === "reperer" ? 18 : 16, paddingBottom: (tab === "messages" || tab === "coach") ? "10px" : "calc(84px + env(safe-area-inset-bottom, 0px))", zoom: tailleTexte, ...(tab === "plus" && plusVue === "menu" ? { display: "flex", flexDirection: "column", minHeight: 0 } : {}) }}>
+        <div ref={contenuRef} style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", paddingTop: tab === "plus" && plusVue === "reperer" ? "calc(env(safe-area-inset-top, 0px) + 18px)" : "calc(env(safe-area-inset-top, 0px) + 6px)", paddingLeft: tab === "plus" && plusVue === "reperer" ? 18 : 16, paddingRight: tab === "plus" && plusVue === "reperer" ? 18 : 16, paddingBottom: "14px", zoom: tailleTexte, ...(tab === "plus" && plusVue === "menu" ? { display: "flex", flexDirection: "column", minHeight: 0 } : {}) }}>
 
           {/* ===== MESSAGES ===== */}
           {tab === "messages" && (
@@ -4120,7 +4232,7 @@ export default function TamiseApp() {
                   {/* Espaceur réel : dans un conteneur défilant en flex, le padding-bottom
                       du parent est parfois ignoré quand un enfant a flex:1 (comme ici) —
                       un vrai élément est plus fiable pour garantir la place sous la barre flottante. */}
-                  <div style={{ flexShrink: 0, height: "calc(78px + env(safe-area-inset-bottom, 0px))" }} />
+                  <div style={{ flexShrink: 0, height: 14 }} />
                 </div>
               </div>
             );
@@ -4583,7 +4695,7 @@ export default function TamiseApp() {
 
         {/* ---------- Saisie ---------- */}
         {tab === "messages" && !vueDestinataire && (
-          <div style={{ padding: "10px 14px calc(12px + 78px + env(safe-area-inset-bottom, 0px))" }}>
+          <div style={{ padding: "10px 14px 12px" }}>
             {avertissementSaisie && (
               <div style={{ fontSize: 11.5, color: C.brick, marginBottom: 6, paddingLeft: 4 }}>{avertissementSaisie}</div>
             )}
@@ -4595,7 +4707,7 @@ export default function TamiseApp() {
           </div>
         )}
         {tab === "coach" && (
-          <div style={{ padding: "10px 14px calc(12px + 78px + env(safe-area-inset-bottom, 0px))", display: "flex", gap: 10, alignItems: "flex-end" }}>
+          <div style={{ padding: "10px 14px 12px", display: "flex", gap: 10, alignItems: "flex-end" }}>
             <textarea value={coachSaisie} ref={coachSaisieRef}
               onChange={(e) => { setCoachSaisie(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px"; }}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); demanderCoach(); } }}
@@ -4606,7 +4718,7 @@ export default function TamiseApp() {
         )}
 
         {/* ---------- Navigation ---------- */}
-        <BottomNav active={tab} badges={badges} onChange={(id) => { setTab(id); setVueDestinataire(false); if (id === "plus") setPlusVue("menu"); }} />
+        {!(kbOpen || typing) && <BottomNav active={tab} badges={badges} onChange={(id) => { setTab(id); setVueDestinataire(false); if (id === "plus") setPlusVue("menu"); }} />}
 
         {/* ---------- Voile de médiation ---------- */}
         {mediation && (
