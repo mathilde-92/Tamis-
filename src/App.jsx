@@ -1334,6 +1334,39 @@ function AgendaView({ events, estCoparent, partenaire, dateSel, setDateSel, onAd
         )
       )}
 
+      {/* Événements proposés par l'autre, en attente de MA décision : affichés
+          en tête et maintenus tant qu'ils ne sont ni acceptés ni refusés, pour
+          ne jamais avoir à les rechercher dans le calendrier. */}
+      {(() => {
+        const aValider = (events || []).filter((e) => e.statut === "attente" && e.proposePar === "autre");
+        if (aValider.length === 0) return null;
+        return (
+          <div style={{ background: "#F6ECD9", borderRadius: 18, padding: "13px 14px", marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
+              <Clock size={14} color="#B07D2E" />
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8a6320" }}>
+                {aValider.length === 1 ? "1 événement attend ta réponse" : aValider.length + " événements attendent ta réponse"}
+              </div>
+            </div>
+            {aValider.map((e) => {
+              const s = parseISO(e.start);
+              return (
+                <button key={e.id} onClick={() => onSelectEvent(e)} style={{ width: "100%", textAlign: "left", border: "none", cursor: "pointer", background: C.card, borderRadius: 14, padding: "11px 13px", marginBottom: 6, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 3.5, alignSelf: "stretch", borderRadius: 999, background: toneC[e.tone], flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.titre}</div>
+                    <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 2 }}>
+                      {JOURS_LONG[(new Date(s.y, s.m, s.d).getDay() + 6) % 7]} {s.d} {MOIS_FR[s.m]}{!e.allDay && e.start.includes("T") ? " · " + e.start.split("T")[1] : ""}
+                    </div>
+                  </div>
+                  <ChevronRight size={16} color="#B07D2E" style={{ flexShrink: 0 }} />
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       {/* Barre : mois + navigation + ajout (tient dans la largeur) */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ fontFamily: "'Fraunces', serif", fontSize: 21, color: C.ink, textTransform: "capitalize", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{MOIS_FR[aff.m]} {aff.y}</div>
@@ -3596,7 +3629,22 @@ export default function TamiseApp() {
           // On ignore ce qui est déjà présent, au cas où un élément reviendrait deux fois.
           Object.keys(parChamp).forEach((champ) => {
             const existants = new Set((r[champ] || []).map((x) => x && x.id).filter(Boolean));
-            const nouveauxDuChamp = parChamp[champ].filter((x) => !x.id || !existants.has(x.id));
+            // Ce qui arrive de l'autre téléphone porte proposePar:"moi" (vrai
+            // chez l'expéditeur, faux ici) : on le convertit en "autre", sans
+            // quoi ce téléphone croit être l'auteur et n'affiche jamais les
+            // boutons accepter/refuser.
+            const nouveauxDuChamp = parChamp[champ]
+              .filter((x) => !x.id || !existants.has(x.id))
+              .map((x) => {
+                if (!x || x.proposePar !== "moi") return x;
+                const conv = { ...x, proposePar: "autre" };
+                // Un groupe de tâches peut contenir des tâches, qui portent
+                // elles aussi leur propre proposePar : à convertir également.
+                if (champ === "groupesTaches" && Array.isArray(x.taches)) {
+                  conv.taches = x.taches.map((t) => (t && t.proposePar === "moi" ? { ...t, proposePar: "autre" } : t));
+                }
+                return conv;
+              });
             if (nouveauxDuChamp.length) maj[champ] = [...(r[champ] || []), ...nouveauxDuChamp];
           });
 
