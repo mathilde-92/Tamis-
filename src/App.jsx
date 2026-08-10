@@ -358,7 +358,7 @@ async function analyseAvecIA(text, rel) {
             '"reformulation": "version CNV respectueuse (null si grave, sain ou invalide) — proche du besoin réel de la personne, jamais un reproche déguisé en phrase polie : pas de sous-entendu, pas de sarcasme voilé, pas de ton passif-agressif sous couvert de gentillesse", ' +
             '"detections": [{"passage": "extrait exact", "type": "<un mécanisme précis, voir liste>", "explication": "1-2 phrases pédagogiques, ton doux, tutoiement", "ressource": "aucune"|"violence"|"juridique_general"|"juridique_enfants"|"exercice_cnv"}], ' +
             '"contradiction": {"source": "agenda"|"depense"|"tache", "refId": "id exact listé ci-dessous", "explication": "1-2 phrases factuelles, sans jamais accuser, invitant à vérifier"} ou null, ' +
-            '"besoinProbable": "si niveau=grave uniquement : ta meilleure hypothèse sur le besoin ou l\'émotion réelle derrière CE message précis, en 1 phrase, fondée sur ce qui est écrit — jamais une formule toute faite. null sinon.", ' +
+            '"besoinProbable": "si niveau=grave uniquement : ta meilleure hypothèse sur le besoin réel derrière CE message précis, formulée pour compléter la phrase « ce dont tu as besoin, c\'est ... » (ex. « que les horaires convenus soient respectés », « de sentir que ton avis compte dans les décisions »). Un groupe nominal court, concret, fondé sur ce qui est écrit — jamais une formule toute faite ni une phrase complète. null sinon.", ' +
             '"clarification": "si niveau=grave et que le besoin n\'est vraiment pas clair à la lecture : UNE question courte et concrète à poser à la personne pour comprendre ce qu\'elle veut dire, avant de l\'aider à reformuler. null si le besoin est déjà assez clair pour proposer une reformulation directement."}. ' +
             "CAS PARTICULIER — texte incompréhensible : si ce n'est pas un vrai message (lettres au hasard, texte vide, inintelligible), renvoie niveau \"invalide\", detections [], reformulation null. " +
             "DISTINCTION CRUCIALE ENTRE « problematique » ET « grave » — ne pas confondre : " +
@@ -3317,7 +3317,6 @@ export default function TamiseApp() {
   const [poussoirOuvert, setPoussoirOuvert] = useState(null);
   const [infoOuverte, setInfoOuverte] = useState(null);
   const [dialogueGrave, setDialogueGrave] = useState(null);
-  const [reponseFait, setReponseFait] = useState("");
   const [reponseClarification, setReponseClarification] = useState("");
   const [chargeReformulationGrave, setChargeReformulationGrave] = useState(false);
   const finListe = useRef(null);
@@ -3348,8 +3347,7 @@ export default function TamiseApp() {
       pushRel("messages", { id: Date.now(), de: "systeme-exp", heure, date });
       patchRel({ alerte: true });
       setMediation(null);
-      setDialogueGrave({ texte, detections: res.detections || [], besoinProbable: res.besoinProbable || null, clarification: res.clarification || null, etape: 0 });
-      setReponseFait("");
+      setDialogueGrave({ texte, detections: res.detections || [], besoinProbable: res.besoinProbable || null, question: res.clarification || null, echanges: [], etape: "hypothese" });
       setReponseClarification("");
       // L'autre personne est prévenue qu'un message a été retenu — sans jamais en voir le contenu.
       if (rel.relationId) {
@@ -3376,19 +3374,59 @@ export default function TamiseApp() {
     setTimeout(() => setMediation(null), 1300);
   }
 
-  async function envoyerReformulationGrave(fait, besoin) {
+  /* Relit la réponse de la personne et décide : soit Iris a assez compris pour
+     reformuler, soit elle repose une question plus précise. Limité à 3 échanges
+     pour ne jamais tourner en boucle et ne pas épuiser quelqu'un déjà en colère. */
+  async function approfondirBesoin(reponse) {
+    const g = dialogueGrave;
+    const echanges = [...(g.echanges || []), { question: g.question || "Alors dis-moi avec tes mots : qu'est-ce qui compte vraiment pour toi, là, maintenant ?", reponse: reponse.trim() }];
+    setChargeReformulationGrave(true);
+    try {
+      const filTxt = echanges.map((e) => "Iris : " + e.question + "\nElle : " + e.reponse).join("\n");
+      const prompt =
+        "Tu es Iris, médiatrice IA. Cette personne a écrit un message contenant une menace, non envoyé : « " + g.texte + " ». " +
+        "Tu cherches à comprendre le besoin réel derrière sa colère, pour l'aider à le dire autrement. Voici votre échange jusqu'ici :\n" + filTxt + "\n" +
+        "Relis attentivement sa dernière réponse. Deux cas : " +
+        "(1) tu comprends maintenant assez précisément ce dont elle a besoin pour l'aider à le formuler — alors renvoie \"compris\" avec ce besoin en une phrase, avec SES mots à elle autant que possible ; " +
+        "(2) c'est encore trop vague, contradictoire ou tu ne vois pas ce qu'elle veut obtenir concrètement — alors renvoie \"question\" avec UNE question courte, douce et précise, qui reprend ce qu'elle vient de dire (jamais une question générique, jamais une question déjà posée). " +
+        (echanges.length >= 3 ? "IMPORTANT : vous avez déjà beaucoup échangé — choisis \"compris\" et fais au mieux avec ce que tu as, ne repose plus de question. " : "") +
+        "Réponds UNIQUEMENT en JSON strict, sans backticks : {\"etat\": \"compris\" ou \"question\", \"besoin\": \"le besoin en 1 phrase si compris, sinon null\", \"question\": \"la question si question, sinon null\"}";
+      const rep = await appellerIA(prompt, 300);
+      const res = JSON.parse(rep.replace(/```json|```/g, "").trim());
+      if (res.etat === "question" && res.question && echanges.length < 3) {
+        setDialogueGrave({ ...g, echanges, question: res.question, etape: "preciser" });
+        setReponseClarification("");
+        setChargeReformulationGrave(false);
+        return;
+      }
+      setChargeReformulationGrave(false);
+      envoyerReformulationGrave(res.besoin || reponse.trim(), false, echanges);
+    } catch (e) {
+      // Si l'IA ne répond pas, on ne bloque pas la personne : on part de ce
+      // qu'elle vient d'écrire, tel quel.
+      setChargeReformulationGrave(false);
+      envoyerReformulationGrave(reponse.trim(), false, echanges);
+    }
+  }
+
+  async function envoyerReformulationGrave(besoin, valideDirectement, echangesArg) {
     const heure = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
     const auj = new Date();
     const date = isoJour(auj.getFullYear(), auj.getMonth(), auj.getDate());
     const g = dialogueGrave;
+    const echanges = echangesArg || g.echanges || [];
     setChargeReformulationGrave(true);
     try {
+      const filTxt = echanges.length
+        ? "Votre échange pour clarifier ce qu'elle voulait vraiment dire :\n" + echanges.map((e) => "Iris : " + e.question + "\nElle : " + e.reponse).join("\n") + "\n"
+        : "";
       const prompt =
         "Tu es Iris, la médiatrice IA de Tamisé. Cette personne vient d'écrire un message grave, contenant une menace, qui n'a pas été envoyé : « " + g.texte + " ». " +
-        "Elle a répondu à deux questions pour clarifier ce qu'elle veut vraiment dire :\n" +
-        "— Le fait précis : « " + fait + " »\n" +
-        "— Son besoin réel : « " + besoin + " »\n" +
-        "Aide-la à dire ça à l'autre personne, sans aucune menace, en te basant précisément sur CES deux réponses — jamais sur une formule générique ou déconnectée de ce qu'elle vient de dire. " +
+        filTxt +
+        (valideDirectement
+          ? "Elle a confirmé que son besoin réel est bien : « " + besoin + " ». "
+          : "Le besoin réel identifié avec elle est : « " + besoin + " ». ") +
+        "Aide-la à dire ça à l'autre personne, sans aucune menace, en te basant précisément sur CE besoin et sur ce qu'elle a dit — jamais sur une formule générique. " +
         "Structure implicite (fait précis, ressenti, besoin, demande concrète), mais n'affiche jamais ces quatre mots — écris une phrase naturelle, parlée. " +
         "Reste proche de son besoin réel, jamais d'un reproche déguisé : pas de sous-entendu, pas de ton passif-agressif, pas de phrase qui accuse tout en ayant l'air polie. " +
         "Réponds UNIQUEMENT avec le message reformulé, à la première personne, tutoiement, rien d'autre autour.";
@@ -4749,20 +4787,57 @@ export default function TamiseApp() {
               <p style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.65, marginTop: 12 }}>
                 {(dialogueGrave.detections[0] && dialogueGrave.detections[0].explication) || "Cette formulation constitue une menace : elle ne sera ni transmise ni reformulée."} Le message original a été conservé, horodaté, dans le journal sécurisé, et {partenaire} a été informé qu'un message dangereux a été retenu.
               </p>
-              <p style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.65, marginTop: 8 }}>
-                Avant de t'aider à le dire autrement, j'ai besoin de mieux comprendre ce que tu ressens vraiment.
-              </p>
-              <p style={{ fontSize: 12.5, fontWeight: 700, color: C.taupe, marginTop: 14, marginBottom: 6 }}>Qu'est-ce qui s'est passé, concrètement ?</p>
-              <textarea value={reponseFait} onChange={(e) => setReponseFait(e.target.value)} placeholder="Le fait précis, sans jugement…" rows={2}
-                style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: C.ink, resize: "vertical", lineHeight: 1.5 }} />
-              <p style={{ fontSize: 12.5, fontWeight: 700, color: C.taupe, marginTop: 12, marginBottom: 6 }}>De quoi as-tu vraiment besoin, là ?</p>
-              <textarea value={reponseClarification} onChange={(e) => setReponseClarification(e.target.value)} placeholder="Ton besoin réel, derrière la colère…" rows={2}
-                style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: C.ink, resize: "vertical", lineHeight: 1.5 }} />
-              <button onClick={() => envoyerReformulationGrave(reponseFait, reponseClarification)} disabled={!reponseFait.trim() || !reponseClarification.trim() || chargeReformulationGrave}
-                style={{ marginTop: 12, width: "100%", border: "none", cursor: (reponseFait.trim() && reponseClarification.trim()) ? "pointer" : "default", background: (reponseFait.trim() && reponseClarification.trim()) ? C.taupe : C.grey, color: (reponseFait.trim() && reponseClarification.trim()) ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                {chargeReformulationGrave && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
-                M'aider à le dire autrement
-              </button>
+
+              {/* Fil de l'échange déjà eu avec Iris sur ce message */}
+              {(dialogueGrave.echanges || []).map((e, i) => (
+                <div key={i} style={{ marginTop: 10 }}>
+                  <div style={{ background: C.sageBg, borderRadius: "16px 16px 16px 4px", padding: "11px 14px", fontSize: 13, color: "#3F4A38", lineHeight: 1.55 }}>{e.question}</div>
+                  {e.reponse && (
+                    <div style={{ background: C.beigeSoft, borderRadius: "16px 16px 4px 16px", padding: "11px 14px", fontSize: 13, color: C.ink, lineHeight: 1.55, marginTop: 6, marginLeft: 28 }}>{e.reponse}</div>
+                  )}
+                </div>
+              ))}
+
+              {/* Étape 1 : Iris propose son hypothèse sur le besoin réel */}
+              {dialogueGrave.etape === "hypothese" && (
+                <>
+                  <div style={{ background: C.sageBg, borderRadius: "16px 16px 16px 4px", padding: "13px 15px", marginTop: 12 }}>
+                    <div style={{ fontSize: 13.5, color: "#3F4A38", lineHeight: 1.6 }}>
+                      Si je comprends bien, ce dont tu as besoin, c'est <b>{dialogueGrave.besoinProbable || "d'être entendu·e sur ce qui te pèse"}</b>. C'est bien ça ?
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <button onClick={() => envoyerReformulationGrave(dialogueGrave.besoinProbable, true)} disabled={chargeReformulationGrave}
+                      style={{ flex: 1, border: "none", cursor: "pointer", background: C.taupe, color: "#fff", borderRadius: 16, padding: "13px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+                      {chargeReformulationGrave && <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} />}
+                      Oui, c'est ça
+                    </button>
+                    <button onClick={() => setDialogueGrave({ ...dialogueGrave, etape: "preciser" })} disabled={chargeReformulationGrave}
+                      style={{ flex: 1, border: `1.5px solid ${C.grey}`, cursor: "pointer", background: C.card, color: C.taupe, borderRadius: 16, padding: "13px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>
+                      Pas vraiment…
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Étape 2 : la personne précise, Iris relit et décide */}
+              {dialogueGrave.etape === "preciser" && (
+                <>
+                  <div style={{ background: C.sageBg, borderRadius: "16px 16px 16px 4px", padding: "13px 15px", marginTop: 12 }}>
+                    <div style={{ fontSize: 13.5, color: "#3F4A38", lineHeight: 1.6 }}>
+                      {dialogueGrave.question || "Alors dis-moi avec tes mots : qu'est-ce qui compte vraiment pour toi, là, maintenant ?"}
+                    </div>
+                  </div>
+                  <textarea value={reponseClarification} onChange={(e) => setReponseClarification(e.target.value)} placeholder="Avec tes mots, même maladroits…" rows={3} autoFocus
+                    style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: C.ink, resize: "vertical", lineHeight: 1.5, marginTop: 10 }} />
+                  <button onClick={() => approfondirBesoin(reponseClarification)} disabled={!reponseClarification.trim() || chargeReformulationGrave}
+                    style={{ marginTop: 10, width: "100%", border: "none", cursor: reponseClarification.trim() ? "pointer" : "default", background: reponseClarification.trim() ? C.taupe : C.grey, color: reponseClarification.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    {chargeReformulationGrave && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
+                    Continuer
+                  </button>
+                </>
+              )}
+
               <button onClick={() => setDialogueGrave(null)} style={{ marginTop: 8, width: "100%", border: "none", cursor: "pointer", background: "transparent", color: C.inkSoft, padding: "10px", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
                 Ne rien envoyer pour l'instant
               </button>
