@@ -376,6 +376,9 @@ async function analyseAvecIA(text, rel) {
             "· Emprise, contrôle & pouvoir — Contrôle/Intrusion, Abus de pouvoir (utiliser une position pour contraindre), Droits spéciaux (se croire au-dessus des règles communes). " +
             "· Biais cognitifs — Illusion de contrôle (croire qu'être parfait·e fera changer l'autre). " +
             "NUANCE OBLIGATOIRE : un message peut être parfaitement sain, maladroit sans être manipulateur, ou juste ambigu — ne force jamais une lecture toxique si elle n'y est pas ; niveau sain + detections [] est une réponse valide et bonne. Mieux vaut 2-3 cartes justes que 6 approximatives. " +
+            "MESSAGES ORDINAIRES DU QUOTIDIEN — RÈGLE ABSOLUE : l'immense majorité des échanges sont banals et parfaitement sains. Une demande simple (« tu peux prendre du pain ? »), un accord, un remerciement, une confirmation, une question pratique, une info logistique → TOUJOURS niveau \"sain\", detections []. " +
+            "Les formules courtes de politesse ou d'assentiment du français courant sont TOUJOURS saines et ne contiennent JAMAIS de mécanisme, quelle que soit leur forme : « pas de souci », « pas de soucis », « ok », « ça marche », « d'accord », « très bien », « c'est noté », « comme tu veux », « je m'en occupe », « merci », « de rien », « à toute », « bisous », « oui », « non », « ça roule », « nickel », « parfait », « je te dis quoi », « on fait comme ça ». Ne cherche JAMAIS un enjeu de pouvoir, une soumission, un sous-entendu ou une manipulation dans ce genre de formule : c'est du langage ordinaire, pas un signal. Une réponse brève n'est pas un signe de froideur, de mur du silence ou de passif-agressif. " +
+            "Ne signale un mécanisme QUE si un vrai lecteur humain, de bonne foi, le verrait aussi clairement. Dans le doute sur un message court et anodin : niveau \"sain\", detections []. Sur-analyser un message banal décrédibilise complètement l'application. " +
             "DISTINCTION IMPORTANTE : si la personne qui écrit se dévalorise ELLE-MÊME (« je suis nul·le »), ce n'est PAS de la dévalorisation envers l'autre — n'en fais pas une carte contre elle. " +
             "Pour « ressource » (par détection) : choisis \"aucune\" la plupart du temps — seulement \"violence\" si menace/intimidation sérieuse, \"juridique_enfants\" si le désaccord touche la garde/l'autorité parentale, \"juridique_general\" pour un autre point de droit clairement engagé (dépense, bien commun...), \"exercice_cnv\" si un exercice pratique aiderait vraiment. Ne mets JAMAIS une ressource par réflexe : la plupart des cartes n'en ont besoin d'aucune. " +
             "Pour « contradiction » : uniquement si le message affirme quelque chose qui contredit clairement un fait CONFIRMÉ ci-dessous (garde/relais niés, paiement nié, tâche dite non faite alors qu'elle est cochée faite — ou l'inverse...). Ne jamais inventer, ne jamais accuser : juste signaler l'écart à vérifier, en citant l'id exact. " +
@@ -3650,6 +3653,33 @@ export default function TamiseApp() {
 
           modifs.forEach((m) => {
             if (!m || !m.champ || !m.id) return;
+
+            // --- Listes à cocher ---
+            if (m.champ === "listes" && m.ajoutItem) {
+              const listes = maj.listes || r.listes || [];
+              const dejaLa = listes.some((l) => l.id === m.id && (l.items || []).some((it) => it.id === m.ajoutItem.id));
+              if (!dejaLa) {
+                maj.listes = listes.map((l) => (l.id === m.id ? { ...l, items: [...(l.items || []), { ...m.ajoutItem, proposePar: "autre" }] } : l));
+              }
+              return;
+            }
+            if (m.champ === "listes" && m.sousId && m.supprimerItem) {
+              const listes = maj.listes || r.listes || [];
+              maj.listes = listes.map((l) => (l.id === m.id ? { ...l, items: (l.items || []).filter((it) => it.id !== m.sousId) } : l));
+              return;
+            }
+            if (m.champ === "listes" && m.sousId) {
+              const listes = maj.listes || r.listes || [];
+              maj.listes = listes.map((l) => (l.id === m.id ? { ...l, items: (l.items || []).map((it) => (it.id === m.sousId ? { ...it, ...m.patch } : it)) } : l));
+              return;
+            }
+            if (m.supprimer) {
+              const liste = maj[m.champ] || r[m.champ] || [];
+              maj[m.champ] = liste.filter((x) => !x || x.id !== m.id);
+              return;
+            }
+
+            // --- Tâches avancées ---
             if (m.champ === "groupesTaches" && m.sousId) {
               const groupes = maj.groupesTaches || r.groupesTaches || [];
               maj.groupesTaches = groupes.map((g) => (g.id === m.id ? { ...g, taches: (g.taches || []).map((t) => (t.id === m.sousId ? { ...t, ...m.patch } : t)) } : g));
@@ -3663,8 +3693,17 @@ export default function TamiseApp() {
               }
               return;
             }
+
+            // --- Modification simple (agenda, dépenses…) ---
+            // Le patch ne doit jamais réintroduire proposePar:"moi" : ce champ
+            // dépend du téléphone, pas de l'élément. Sans cette protection, une
+            // modification par l'autre personne redevenait "en attente de ma
+            // réponse" après que je l'ai déjà validée — la notification
+            // réapparaissait en boucle.
+            const patchNettoye = { ...(m.patch || {}) };
+            delete patchNettoye.proposePar;
             const liste = maj[m.champ] || r[m.champ] || [];
-            maj[m.champ] = liste.map((x) => (x && x.id === m.id ? { ...x, ...m.patch } : x));
+            maj[m.champ] = liste.map((x) => (x && x.id === m.id ? { ...x, ...patchNettoye } : x));
           });
 
           return maj;
@@ -3761,18 +3800,31 @@ export default function TamiseApp() {
   function supprimerListe(id) {
     if (!window.confirm("Supprimer cette liste et tous ses éléments ?")) return;
     setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, listes: r.listes.filter((l) => l.id !== id) } : r)));
+    if (rel.relationId) envoyerElementServeur(rel.relationId, "maj", MON_APPAREIL, { champ: "listes", id, supprimer: true }).catch(() => {});
   }
   function toggleListeOuverte(id) {
+    // Purement local (plier/déplier) : rien à synchroniser.
     setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, listes: r.listes.map((l) => (l.id === id ? { ...l, ouverte: !l.ouverte } : l)) } : r)));
   }
   function ajouterItemListe(listeId, texte) {
-    setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, listes: r.listes.map((l) => (l.id === listeId ? { ...l, items: [...l.items, { id: "i" + Date.now(), texte, fait: false }] } : l)) } : r)));
+    const item = { id: "i" + Date.now(), texte, fait: false, proposePar: "moi", confirmation: "attente" };
+    setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, listes: r.listes.map((l) => (l.id === listeId ? { ...l, items: [...l.items, item] } : l)) } : r)));
+    // Ajouter un élément à une liste existante est une MODIFICATION de la liste :
+    // sans cet envoi, l'autre téléphone ne voit jamais le nouvel élément.
+    if (rel.relationId) envoyerElementServeur(rel.relationId, "maj", MON_APPAREIL, { champ: "listes", id: listeId, ajoutItem: item }).catch(() => {});
+  }
+  function majItemListe(listeId, itemId, patch) {
+    setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, listes: r.listes.map((l) => (l.id === listeId ? { ...l, items: l.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it)) } : l)) } : r)));
+    if (rel.relationId) envoyerElementServeur(rel.relationId, "maj", MON_APPAREIL, { champ: "listes", id: listeId, sousId: itemId, patch }).catch(() => {});
   }
   function toggleItemListe(listeId, itemId) {
-    setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, listes: r.listes.map((l) => (l.id === listeId ? { ...l, items: l.items.map((it) => (it.id === itemId ? { ...it, fait: !it.fait } : it)) } : l)) } : r)));
+    const liste = (rel.listes || []).find((l) => l.id === listeId);
+    const item = liste && liste.items.find((it) => it.id === itemId);
+    majItemListe(listeId, itemId, { fait: !(item && item.fait) });
   }
   function supprimerItemListe(listeId, itemId) {
     setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, listes: r.listes.map((l) => (l.id === listeId ? { ...l, items: l.items.filter((it) => it.id !== itemId) } : l)) } : r)));
+    if (rel.relationId) envoyerElementServeur(rel.relationId, "maj", MON_APPAREIL, { champ: "listes", id: listeId, sousId: itemId, supprimerItem: true }).catch(() => {});
   }
 
   /* ---- Tâches avancées (collègues), avec synchronisation agenda quand une échéance est posée ---- */
@@ -3968,6 +4020,13 @@ export default function TamiseApp() {
             <div style={{ display: "flex", gap: 6, alignItems: "center", overflowX: "auto" }}>
               {relations.map((r) => {
                 const actif = r.id === relId;
+                // Y a-t-il quelque chose de nouveau dans CETTE relation ?
+                const nouveaute =
+                  (r.messages || []).slice(r.dernierVu || 0).some((m) => m.de === "autre")
+                  || (r.agenda || []).some((e) => e.statut === "attente" && e.proposePar === "autre")
+                  || (r.depenses || []).some((d) => d.validation === "attente" && d.proposePar === "autre")
+                  || (r.groupesTaches || []).some((g) => (g.taches || []).some((t) => t.confirmation === "attente" && t.proposePar === "autre"))
+                  || (r.listes || []).some((l) => (l.items || []).some((it) => it.confirmation === "attente" && it.proposePar === "autre"));
                 return (
                   <button key={r.id} onClick={() => { if (actif) { setGererRelOuvert(true); } else { setRelId(r.id); setVueDestinataire(false); setPlusVue("menu"); } }}
                     style={{
@@ -3979,8 +4038,12 @@ export default function TamiseApp() {
                       color: actif ? "#fff" : hexToRgba(C.taupe, 0.75),
                       display: "flex", alignItems: "center", gap: 6,
                       transition: "all .2s",
+                      position: "relative",
                     }}>
                     <span style={{ fontSize: 14 }}>{r.emoji}</span> {r.nom} {actif && <Pencil size={11} style={{ opacity: 0.75 }} />}
+                    {nouveaute && (
+                      <span style={{ position: "absolute", top: 2, right: 4, width: 8, height: 8, borderRadius: 999, background: C.brick, border: "1.5px solid " + (actif ? C.taupe : C.bg) }} />
+                    )}
                   </button>
                 );
               })}
@@ -4190,7 +4253,13 @@ export default function TamiseApp() {
                 <Plus size={16} /> Ajouter une dépense
               </button>
 
-              {depenses.filter((d) => d.validation !== "refuse").map((d) => {
+              {/* Les dépenses qui attendent MA réponse remontent en tête de liste,
+                  et reprennent leur place chronologique une fois traitées. */}
+              {depenses.filter((d) => d.validation !== "refuse").slice().sort((a, b) => {
+                const aA = a.validation === "attente" && a.proposePar === "autre" ? 0 : 1;
+                const bA = b.validation === "attente" && b.proposePar === "autre" ? 0 : 1;
+                return aA - bA;
+              }).map((d) => {
                 const regle = d.statut === "regle";
                 const enAttenteValidation = d.validation === "attente";
                 const aConfirmer = enAttenteValidation && d.proposePar === "autre" && !(rel.depensesVues || []).includes(d.id);
