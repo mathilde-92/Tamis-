@@ -304,31 +304,121 @@ function detecterContradictionLocale(texte, rel) {
   return null;
 }
 
-/** Vérifie qu'un texte court (intitulé de dépense, nom de tâche) correspond
- * bien à ce qu'on attend, et n'est pas une insulte ou un message détourné.
- * Trois issues possibles : valide, invalide (refusé), ou ambigu (une question
- * est posée pour préciser — la personne peut choisir de ne pas répondre).
- * Volontairement séparée de l'analyse des messages : ici on ne reformule
- * rien. */
+/** Analyse un texte court destiné à un espace partagé (intitulé de dépense,
+ * nom de tâche, titre d'événement, élément de liste). Même logique que pour
+ * les messages : rien de blessant ne doit pouvoir passer par un champ
+ * détourné. Cinq issues :
+ *  - valide      : rien à signaler, on enregistre tel quel
+ *  - ambigu      : mot à double sens, on pose une question pour lever le doute
+ *  - horssujet   : ce n'est pas un intitulé plausible (refus simple)
+ *  - reformuler  : contenu blessant ou manipulateur → version neutre proposée
+ *  - bloquer     : menace → refusé, et on cherche le besoin derrière
+ */
 async function validerTexteLibre(texte, quoi) {
   try {
     const prompt =
-      "Un texte court va être enregistré comme " + quoi + " dans une application. " +
-      "Vérifie qu'il s'agit bien d'un " + quoi + " plausible et neutre — pas une insulte, une menace, un message personnel détourné, ou un non-sens sans rapport. " +
-      "Un intitulé bref, même vague ou mal orthographié, reste valide s'il pourrait raisonnablement être un " + quoi + " (ex. \"cantine\", \"chaussures foot\", \"rdv dentiste\"). " +
-      "Si le texte est un mot ambigu qui pourrait désigner soit quelque chose de tout à fait normal, soit quelque chose de très différent selon le sens (ex. argot, mot à plusieurs sens), ne tranche pas au hasard : marque-le \"ambigu\" et pose une question courte pour lever le doute, plutôt que d'accepter ou de refuser à l'aveugle. " +
-      "Réponds UNIQUEMENT en JSON strict, sans backticks : {\"etat\": \"valide\" ou \"invalide\" ou \"ambigu\", \"raison\": \"1 phrase courte et douce si invalide, sinon null\", \"question\": \"1 question courte si ambigu, sinon null\"}. " +
+      "Un texte court va être enregistré comme " + quoi + " dans un espace partagé entre deux personnes d'une relation tendue. " +
+      "Ce champ ne doit jamais servir à faire passer un message blessant à l'autre. Analyse-le : " +
+      "\"valide\" = intitulé plausible et neutre, même vague ou mal orthographié (ex. \"cantine\", \"chaussures foot\", \"rdv dentiste\") — c'est le cas de l'immense majorité, ne cherche pas la petite bête ; " +
+      "\"ambigu\" = mot à double sens qu'on ne peut pas trancher sans risque de se tromper → pose UNE question courte ; " +
+      "\"horssujet\" = ce n'est pas un intitulé du tout, sans être blessant (texte au hasard, phrase sans rapport) ; " +
+      "\"reformuler\" = contient une insulte, une vulgarité, un reproche, un sarcasme, une pique ou un mécanisme de manipulation visant l'autre personne → propose une version neutre qui garde l'information utile et retire ce qui blesse (si rien d'utile ne reste, mets reformulation à null) ; " +
+      "\"bloquer\" = contient une menace explicite ou implicite, une intimidation, ou un contenu illégal. " +
+      "Pour \"reformuler\" et \"bloquer\", donne aussi \"besoinProbable\" : ta meilleure hypothèse sur le besoin réel derrière ces mots, formulée pour compléter « ce dont tu as besoin, c'est ... » (groupe nominal court et concret, fondé sur ce qui est écrit). " +
+      "Réponds UNIQUEMENT en JSON strict, sans backticks : {\"etat\": \"valide\"|\"ambigu\"|\"horssujet\"|\"reformuler\"|\"bloquer\", \"raison\": \"1 phrase courte et douce expliquant pourquoi, si etat n'est pas valide — sinon null\", \"question\": \"1 question courte si ambigu, sinon null\", \"reformulation\": \"la version neutre si reformuler, sinon null\", \"besoinProbable\": \"le besoin si reformuler ou bloquer, sinon null\"}. " +
       "Texte : " + JSON.stringify(texte);
-    const rep = await appellerIA(prompt, 150);
+    const rep = await appellerIA(prompt, 350);
     const res = JSON.parse(rep.replace(/```json|```/g, "").trim());
-    const etat = res.etat === "invalide" ? "invalide" : res.etat === "ambigu" ? "ambigu" : "valide";
-    return { etat, raison: res.raison || null, question: res.question || null };
+    const etats = ["valide", "ambigu", "horssujet", "reformuler", "bloquer"];
+    const etat = etats.includes(res.etat) ? res.etat : "valide";
+    return {
+      etat,
+      raison: res.raison || null,
+      question: res.question || null,
+      reformulation: res.reformulation || null,
+      besoinProbable: res.besoinProbable || null,
+    };
   } catch (e) {
     // Si la vérification échoue (hors ligne, IA indisponible), on n'empêche
     // jamais quelqu'un d'enregistrer une vraie dépense ou tâche à cause d'un
     // problème technique — on laisse passer.
-    return { etat: "valide", raison: null, question: null };
+    return { etat: "valide", raison: null, question: null, reformulation: null, besoinProbable: null };
   }
+}
+
+/** Bloc d'interface partagé par tous les formulaires d'espace commun
+ * (dépense, tâche, événement, élément de liste) : affiche le résultat du
+ * filtrage et propose la suite, sans jamais laisser passer ce qui blesse. */
+function BlocFiltrage({ resultat, onAccepterReformulation, onReecrire, onAnnuler }) {
+  if (!resultat) return null;
+  const { etat, raison, reformulation, besoinProbable } = resultat;
+
+  if (etat === "bloquer") {
+    return (
+      <div style={{ background: C.brickBg, borderRadius: 14, padding: "13px 14px", marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+          <Shield size={15} color={C.brick} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 12.5, color: C.brick, lineHeight: 1.55, fontWeight: 700 }}>
+            Ceci ne peut pas être enregistré.
+          </div>
+        </div>
+        <div style={{ fontSize: 12.5, color: C.ink, lineHeight: 1.55, marginTop: 8 }}>
+          {raison || "Ce texte contient une menace. Cet espace est partagé : il ne peut pas servir à ça."}
+        </div>
+        {besoinProbable && (
+          <div style={{ background: C.card, borderRadius: 12, padding: "11px 13px", marginTop: 10, fontSize: 12.5, color: C.ink, lineHeight: 1.55 }}>
+            Si je comprends bien, ce dont tu as besoin, c'est <b>{besoinProbable}</b>. Si c'est ça, tu peux l'écrire directement à {"l'autre personne"} dans les messages — Tamisé t'aidera à le dire autrement.
+          </div>
+        )}
+        <button onClick={onReecrire} style={{ width: "100%", border: "none", cursor: "pointer", background: C.taupe, color: "#fff", borderRadius: 14, padding: "12px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", marginTop: 10 }}>
+          Réécrire
+        </button>
+        <button onClick={onAnnuler} style={{ width: "100%", border: "none", cursor: "pointer", background: "transparent", color: C.inkSoft, padding: "9px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>
+          Abandonner
+        </button>
+      </div>
+    );
+  }
+
+  if (etat === "reformuler") {
+    return (
+      <div style={{ background: "#F6ECD9", borderRadius: 14, padding: "13px 14px", marginBottom: 14 }}>
+        <div style={{ fontSize: 12.5, color: "#8a6320", lineHeight: 1.55 }}>
+          {raison || "Ces mots pourraient blesser la personne qui les lira."}
+        </div>
+        {besoinProbable && (
+          <div style={{ fontSize: 12.5, color: "#8a6320", lineHeight: 1.55, marginTop: 8 }}>
+            Si je comprends bien, ce dont tu as besoin, c'est <b>{besoinProbable}</b>.
+          </div>
+        )}
+        {reformulation ? (
+          <>
+            <div style={{ background: C.card, borderRadius: 12, padding: "11px 13px", marginTop: 10, fontSize: 13.5, color: C.ink, fontWeight: 700 }}>
+              {reformulation}
+            </div>
+            <button onClick={() => onAccepterReformulation(reformulation)} style={{ width: "100%", border: "none", cursor: "pointer", background: "#B07D2E", color: "#fff", borderRadius: 14, padding: "12px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", marginTop: 10 }}>
+              Enregistrer cette version
+            </button>
+          </>
+        ) : (
+          <div style={{ fontSize: 12.5, color: "#8a6320", lineHeight: 1.55, marginTop: 8 }}>
+            Il ne reste rien à enregistrer une fois ce qui blesse retiré.
+          </div>
+        )}
+        <button onClick={onReecrire} style={{ width: "100%", border: `1.5px solid ${C.grey}`, cursor: "pointer", background: C.card, color: C.taupe, borderRadius: 14, padding: "11px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", marginTop: 8 }}>
+          Écrire autrement moi-même
+        </button>
+      </div>
+    );
+  }
+
+  // horssujet : refus simple, sans reformulation possible
+  return (
+    <div style={{ background: C.brickBg, borderRadius: 14, padding: "11px 13px", marginBottom: 14, display: "flex", gap: 9, alignItems: "flex-start" }}>
+      <AlertTriangle size={15} color={C.brick} style={{ flexShrink: 0, marginTop: 1 }} />
+      <div style={{ fontSize: 12.5, color: C.brick, lineHeight: 1.5 }}>{raison || "Ce texte ne correspond pas à ce qui est attendu ici."}</div>
+    </div>
+  );
 }
 
 async function analyseAvecIA(text, rel) {
@@ -1494,6 +1584,7 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
   const [erreurContenu, setErreurContenu] = useState(null);
   const [questionAmbigue, setQuestionAmbigue] = useState(null);
   const [reponseAmbigue, setReponseAmbigue] = useState("");
+  const [filtrage, setFiltrage] = useState(null);
   const m = parseFloat((montant || "").replace(",", "."));
   const ok = nom.trim() && m > 0;
   const etaitConfirmee = ed && ed.validation === "confirme";
@@ -1504,11 +1595,12 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
     if (!ok) return;
     setErreurContenu(null);
     setQuestionAmbigue(null);
+    setFiltrage(null);
     setVerification(true);
-    const { etat, raison, question } = await validerTexteLibre(nom.trim(), "intitulé de dépense");
+    const res = await validerTexteLibre(nom.trim(), "intitulé de dépense");
     setVerification(false);
-    if (etat === "invalide") { setErreurContenu(raison || "Cet intitulé ne correspond pas à une dépense."); return; }
-    if (etat === "ambigu" && question) { setQuestionAmbigue(question); return; }
+    if (res.etat === "ambigu" && res.question) { setQuestionAmbigue(res.question); return; }
+    if (res.etat !== "valide") { setFiltrage(res); return; }
     creer();
   }
   // Une fois la précision donnée (ou volontairement ignorée), on enregistre —
@@ -1548,6 +1640,11 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
         </div>
       )}
 
+      <BlocFiltrage resultat={filtrage}
+        onAccepterReformulation={(t) => { setFiltrage(null); setNom(t); creer(t); }}
+        onReecrire={() => { setFiltrage(null); setNom(""); }}
+        onAnnuler={onClose} />
+
       {questionAmbigue && (
         <div style={{ background: "#F6ECD9", borderRadius: 14, padding: "13px 14px", marginBottom: 14 }}>
           <div style={{ display: "flex", gap: 9, alignItems: "flex-start", marginBottom: 10 }}>
@@ -1570,7 +1667,7 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
         </div>
       )}
 
-      {!questionAmbigue && (
+      {!questionAmbigue && !filtrage && (
       <button onClick={valider} disabled={!ok || verification} style={{ width: "100%", border: "none", cursor: ok && !verification ? "pointer" : "default", background: ok && !verification ? C.taupe : C.grey, color: ok && !verification ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
         {verification && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
         {ed ? "Enregistrer les modifications" : "Ajouter la dépense"}
@@ -2090,6 +2187,7 @@ function TacheSheet({ tache, onSave, onDelete, onClose }) {
   const [erreurContenu, setErreurContenu] = useState(null);
   const [questionAmbigue, setQuestionAmbigue] = useState(null);
   const [reponseAmbigue, setReponseAmbigue] = useState("");
+  const [filtrage, setFiltrage] = useState(null);
   function creer(nomFinal) {
     onSave({ nom: (nomFinal || nom).trim(), statut, priorite, echeance: echeance || null });
   }
@@ -2097,11 +2195,12 @@ function TacheSheet({ tache, onSave, onDelete, onClose }) {
     if (!nom.trim()) return;
     setErreurContenu(null);
     setQuestionAmbigue(null);
+    setFiltrage(null);
     setVerification(true);
-    const { etat, raison, question } = await validerTexteLibre(nom.trim(), "nom de tâche");
+    const res = await validerTexteLibre(nom.trim(), "nom de tâche");
     setVerification(false);
-    if (etat === "invalide") { setErreurContenu(raison || "Ce texte ne correspond pas à une tâche."); return; }
-    if (etat === "ambigu" && question) { setQuestionAmbigue(question); return; }
+    if (res.etat === "ambigu" && res.question) { setQuestionAmbigue(res.question); return; }
+    if (res.etat !== "valide") { setFiltrage(res); return; }
     creer();
   }
   function validerApresPrecision(ignorer) {
@@ -2155,7 +2254,7 @@ function TacheSheet({ tache, onSave, onDelete, onClose }) {
         </div>
       )}
 
-      {!questionAmbigue && (
+      {!questionAmbigue && !filtrage && (
       <button onClick={valider} disabled={!nom.trim() || verification} style={{ width: "100%", border: "none", cursor: nom.trim() && !verification ? "pointer" : "default", background: nom.trim() && !verification ? C.taupe : C.grey, color: nom.trim() && !verification ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", marginBottom: tache ? 10 : 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
         {verification && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
         {tache ? "Enregistrer" : "Ajouter la tâche"}
@@ -2361,21 +2460,60 @@ function AjoutEvenement({ dateDefaut, evenement, type, aDesEnfants, onClose, onC
   const [cat, setCat] = useState(ed ? (CATS_EVENT.find((c) => c[0] === ed.cat) || CATS_EVENT[0]) : CATS_EVENT[0]);
   const inputStyle = { border: "none", outline: "none", background: C.grey, borderRadius: 10, padding: "7px 10px", fontSize: 13.5, fontFamily: "inherit", color: C.ink };
   const selStyle = { ...inputStyle, cursor: "pointer" };
-  function valider() {
-    if (!titre.trim()) return;
+  const [verification, setVerification] = useState(false);
+  const [filtrage, setFiltrage] = useState(null);
+  const [questionAmbigue, setQuestionAmbigue] = useState(null);
+  const [reponseAmbigue, setReponseAmbigue] = useState("");
+  function creer(titreFinal) {
     const start = allDay ? dDate : dDate + "T" + dTime;
     const end = allDay ? fDate : fDate + "T" + fTime;
-    onCreate({ id: ed ? ed.id : "ev" + Date.now(), titre: titre.trim(), allDay, start, end, cat: cat[0], tone: cat[1], recurrence: rec, alerte, statut: ed ? ed.statut : "attente", proposePar: ed ? ed.proposePar : "moi" });
+    onCreate({ id: ed ? ed.id : "ev" + Date.now(), titre: (titreFinal || titre).trim(), allDay, start, end, cat: cat[0], tone: cat[1], recurrence: rec, alerte, statut: ed ? ed.statut : "attente", proposePar: ed ? ed.proposePar : "moi" });
+  }
+  async function valider() {
+    if (!titre.trim()) return;
+    setFiltrage(null);
+    setQuestionAmbigue(null);
+    setVerification(true);
+    const res = await validerTexteLibre(titre.trim(), "titre d'événement d'agenda");
+    setVerification(false);
+    if (res.etat === "ambigu" && res.question) { setQuestionAmbigue(res.question); return; }
+    if (res.etat !== "valide") { setFiltrage(res); return; }
+    creer();
+  }
+  function validerApresPrecision(ignorer) {
+    creer(ignorer || !reponseAmbigue.trim() ? titre : titre.trim() + " (" + reponseAmbigue.trim() + ")");
   }
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <button onClick={onClose} aria-label="Fermer" style={{ border: "none", background: "rgba(255,255,255,0.88)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)", boxShadow: "0 2px 8px rgba(69,62,54,0.16)", borderRadius: 999, width: 30, height: 30, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={15} color={C.ink} /></button>
         <div style={{ fontFamily: "'Fraunces', serif", fontSize: 17, color: C.ink }}>{ed ? "Modifier l'événement" : "Nouvel événement"}</div>
-        <button onClick={valider} disabled={!titre.trim()} aria-label="Valider" style={{ border: "none", background: titre.trim() ? C.taupe : C.grey, color: titre.trim() ? "#fff" : C.inkSoft, borderRadius: 999, width: 30, height: 30, cursor: titre.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}><Check size={16} /></button>
+        <button onClick={valider} disabled={!titre.trim() || verification} aria-label="Valider" style={{ border: "none", background: titre.trim() && !verification ? C.taupe : C.grey, color: titre.trim() && !verification ? "#fff" : C.inkSoft, borderRadius: 999, width: 30, height: 30, cursor: titre.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {verification ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <Check size={16} />}
+        </button>
       </div>
 
       <input value={titre} onChange={(e) => setTitre(e.target.value)} placeholder="Titre (ex : RDV pédiatre)" autoFocus style={{ width: "100%", boxSizing: "border-box", border: "none", outline: "none", background: C.card, borderRadius: 14, padding: "14px 16px", fontSize: 16, fontFamily: "inherit", color: C.ink, margin: "14px 0 12px", boxShadow: "0 2px 8px rgba(69,62,54,0.05)" }} />
+
+      <BlocFiltrage resultat={filtrage}
+        onAccepterReformulation={(t) => { setFiltrage(null); setTitre(t); creer(t); }}
+        onReecrire={() => { setFiltrage(null); setTitre(""); }}
+        onAnnuler={onClose} />
+
+      {questionAmbigue && (
+        <div style={{ background: "#F6ECD9", borderRadius: 14, padding: "13px 14px", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 9, alignItems: "flex-start", marginBottom: 10 }}>
+            <HelpCircle size={15} color="#B07D2E" style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ fontSize: 12.5, color: "#8a6320", lineHeight: 1.5 }}>{questionAmbigue}</div>
+          </div>
+          <input value={reponseAmbigue} onChange={(e) => setReponseAmbigue(e.target.value)} placeholder="Ta réponse (facultatif)…"
+            style={{ width: "100%", boxSizing: "border-box", border: "1.5px solid rgba(176,125,46,0.3)", outline: "none", background: C.card, borderRadius: 12, padding: "10px 13px", fontSize: 13.5, fontFamily: "inherit", color: C.ink, marginBottom: 10 }} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => validerApresPrecision(true)} style={{ flex: 1, border: `1.5px solid ${C.grey}`, cursor: "pointer", background: "transparent", color: C.inkSoft, borderRadius: 12, padding: "10px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>Préférer ne pas répondre</button>
+            <button onClick={() => validerApresPrecision(false)} style={{ flex: 1, border: "none", cursor: "pointer", background: "#B07D2E", color: "#fff", borderRadius: 12, padding: "10px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>Valider</button>
+          </div>
+        </div>
+      )}
 
       <Card style={{ padding: "2px 16px", marginBottom: 12 }}>
         <LigneReglage label="Jour entier">
@@ -3565,6 +3703,7 @@ export default function TamiseApp() {
   const [evolutionOuverte, setEvolutionOuverte] = useState(false);
   const [nouvelleListeOuverte, setNouvelleListeOuverte] = useState(false);
   const [saisieItem, setSaisieItem] = useState({}); // { [listeId]: texte en cours de saisie }
+  const [filtrageListe, setFiltrageListe] = useState(null); // { listeId, texte, res } si un ajout est refusé
   const [nouveauGroupeOuvert, setNouveauGroupeOuvert] = useState(false);
   const [nouvelleTacheGroupe, setNouvelleTacheGroupe] = useState(null); // groupeId ou null
   const [tacheOuverte, setTacheOuverte] = useState(null); // { groupeId, tache }
@@ -3806,8 +3945,21 @@ export default function TamiseApp() {
     // Purement local (plier/déplier) : rien à synchroniser.
     setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, listes: r.listes.map((l) => (l.id === id ? { ...l, ouverte: !l.ouverte } : l)) } : r)));
   }
-  function ajouterItemListe(listeId, texte) {
-    const item = { id: "i" + Date.now(), texte, fait: false, proposePar: "moi", confirmation: "attente" };
+  async function ajouterItemListe(listeId, texte) {
+    // Une liste partagée est un espace commun : elle ne doit jamais servir à
+    // faire passer une insulte ou une menace. Même filtrage que partout ailleurs.
+    const res = await validerTexteLibre(texte, "élément de liste à cocher");
+    if (res.etat === "bloquer") {
+      setFiltrageListe({ listeId, texte, res });
+      return;
+    }
+    const texteFinal = res.etat === "reformuler" && res.reformulation ? res.reformulation : texte;
+    if (res.etat === "reformuler" && !res.reformulation) {
+      // Rien d'utile ne restait une fois le contenu blessant retiré.
+      setFiltrageListe({ listeId, texte, res });
+      return;
+    }
+    const item = { id: "i" + Date.now(), texte: texteFinal, fait: false, proposePar: "moi", confirmation: "attente" };
     setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, listes: r.listes.map((l) => (l.id === listeId ? { ...l, items: [...l.items, item] } : l)) } : r)));
     // Ajouter un élément à une liste existante est une MODIFICATION de la liste :
     // sans cet envoi, l'autre téléphone ne voit jamais le nouvel élément.
@@ -4572,6 +4724,22 @@ export default function TamiseApp() {
                             placeholder="Ajouter un élément…" style={{ flex: 1, border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 12, padding: "9px 12px", fontSize: 13, fontFamily: "inherit", color: C.ink }} />
                           <button onClick={() => { if ((saisieItem[liste.id] || "").trim()) { ajouterItemListe(liste.id, saisieItem[liste.id].trim()); setSaisieItem({ ...saisieItem, [liste.id]: "" }); } }} style={{ border: "none", cursor: "pointer", background: COULEURS_LISTE[liste.couleur], color: "#fff", borderRadius: 12, width: 36, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Plus size={15} /></button>
                         </div>
+                        {filtrageListe && filtrageListe.listeId === liste.id && (
+                          <div style={{ background: C.brickBg, borderRadius: 12, padding: "11px 13px", marginTop: 8, display: "flex", gap: 9, alignItems: "flex-start" }}>
+                            <Shield size={15} color={C.brick} style={{ flexShrink: 0, marginTop: 1 }} />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: 12.5, color: C.brick, lineHeight: 1.5 }}>
+                                {filtrageListe.res.raison || "Ce texte ne peut pas être ajouté ici : une liste partagée n'est pas un endroit pour s'adresser à l'autre de cette façon."}
+                              </div>
+                              {filtrageListe.res.besoinProbable && (
+                                <div style={{ fontSize: 12, color: C.ink, lineHeight: 1.5, marginTop: 6 }}>
+                                  Si ce dont tu as besoin, c'est <b>{filtrageListe.res.besoinProbable}</b>, tu peux en parler à Iris — elle t'aidera à le formuler autrement.
+                                </div>
+                              )}
+                              <button onClick={() => setFiltrageListe(null)} style={{ border: "none", background: "none", cursor: "pointer", color: C.brick, fontSize: 12, fontWeight: 700, fontFamily: "inherit", padding: "6px 0 0" }}>J'ai compris</button>
+                            </div>
+                          </div>
+                        )}
                         <button onClick={() => supprimerListe(liste.id)} style={{ width: "100%", marginTop: 12, border: "none", background: "none", cursor: "pointer", color: C.brick, fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", padding: 0 }}>Supprimer cette liste</button>
                       </div>
                     )}
