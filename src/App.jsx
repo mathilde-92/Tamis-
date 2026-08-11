@@ -314,13 +314,14 @@ function detecterContradictionLocale(texte, rel) {
  *  - reformuler  : contenu blessant ou manipulateur → version neutre proposée
  *  - bloquer     : menace → refusé, et on cherche le besoin derrière
  */
-async function validerTexteLibre(texte, quoi) {
+async function validerTexteLibre(texte, quoi, precision) {
   try {
     const prompt =
       "Un texte court va être enregistré comme " + quoi + " dans un espace partagé entre deux personnes d'une relation tendue. " +
+      (precision ? "La personne a déjà précisé ce qu'elle voulait dire : « " + precision + " ». Tiens-en compte : si cette précision lève le doute et montre qu'il n'y a rien de blessant, réponds \"valide\". " : "") +
       "Ce champ ne doit jamais servir à faire passer un message blessant à l'autre. Analyse-le : " +
-      "\"valide\" = intitulé plausible et neutre, même vague ou mal orthographié (ex. \"cantine\", \"chaussures foot\", \"rdv dentiste\") — c'est le cas de l'immense majorité, ne cherche pas la petite bête ; " +
-      "\"ambigu\" = mot à double sens qu'on ne peut pas trancher sans risque de se tromper → pose UNE question courte ; " +
+      "\"valide\" = intitulé plausible et neutre, même vague, mal orthographié, en argot ou peu clair (ex. \"cantine\", \"chaussures foot\", \"rdv dentiste\", \"truc de maman\") — c'est le cas de l'immense majorité, ne cherche pas la petite bête. Un intitulé qu'on ne comprend pas bien mais qui ne vise clairement PAS l'autre personne est VALIDE : laisse-le tel quel, ce n'est pas ton rôle de le rendre plus clair ; " +
+      "\"ambigu\" = RARE, réservé au cas où le mot pourrait raisonnablement cacher une pique ou un message adressé à l'autre, et où tu ne peux pas trancher sans risque → pose UNE question courte. N'utilise PAS \"ambigu\" juste parce que le sens t'échappe : seulement si un vrai soupçon de manipulation existe ; " +
       "\"horssujet\" = ce n'est pas un intitulé du tout, sans être blessant (texte au hasard, phrase sans rapport) ; " +
       "\"reformuler\" = contient une insulte, une vulgarité, un reproche, un sarcasme, une pique ou un mécanisme de manipulation visant l'autre personne → propose une version neutre qui garde l'information utile et retire ce qui blesse (si rien d'utile ne reste, mets reformulation à null) ; " +
       "\"bloquer\" = contient une menace explicite ou implicite, une intimidation, ou un contenu illégal. " +
@@ -1606,8 +1607,18 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
   // Une fois la précision donnée (ou volontairement ignorée), on enregistre —
   // en glissant la précision dans l'intitulé si elle a été donnée, pour que
   // ce soit gardé quelque part.
-  function validerApresPrecision(ignorer) {
-    creer(ignorer || !reponseAmbigue.trim() ? nom : nom.trim() + " (" + reponseAmbigue.trim() + ")");
+  // La précision sert UNIQUEMENT à lever le doute sur le sens du mot : elle
+  // n'est jamais recopiée dans l'intitulé (elle l'allongerait inutilement, et
+  // ce texte-là n'a pas été filtré). On revérifie avec ce contexte en plus.
+  async function validerApresPrecision(ignorer) {
+    setQuestionAmbigue(null);
+    if (ignorer || !reponseAmbigue.trim()) { creer(); return; }
+    setVerification(true);
+    const res = await validerTexteLibre(nom.trim(), "intitulé de dépense", reponseAmbigue.trim());
+    setVerification(false);
+    setReponseAmbigue("");
+    if (res.etat === "reformuler" || res.etat === "bloquer" || res.etat === "horssujet") { setFiltrage(res); return; }
+    creer();
   }
   return (
     <>
@@ -2203,8 +2214,15 @@ function TacheSheet({ tache, onSave, onDelete, onClose }) {
     if (res.etat !== "valide") { setFiltrage(res); return; }
     creer();
   }
-  function validerApresPrecision(ignorer) {
-    creer(ignorer || !reponseAmbigue.trim() ? nom : nom.trim() + " (" + reponseAmbigue.trim() + ")");
+  async function validerApresPrecision(ignorer) {
+    setQuestionAmbigue(null);
+    if (ignorer || !reponseAmbigue.trim()) { creer(); return; }
+    setVerification(true);
+    const res = await validerTexteLibre(nom.trim(), "nom de tâche", reponseAmbigue.trim());
+    setVerification(false);
+    setReponseAmbigue("");
+    if (res.etat === "reformuler" || res.etat === "bloquer" || res.etat === "horssujet") { setFiltrage(res); return; }
+    creer();
   }
   return (
     <>
@@ -2480,8 +2498,15 @@ function AjoutEvenement({ dateDefaut, evenement, type, aDesEnfants, onClose, onC
     if (res.etat !== "valide") { setFiltrage(res); return; }
     creer();
   }
-  function validerApresPrecision(ignorer) {
-    creer(ignorer || !reponseAmbigue.trim() ? titre : titre.trim() + " (" + reponseAmbigue.trim() + ")");
+  async function validerApresPrecision(ignorer) {
+    setQuestionAmbigue(null);
+    if (ignorer || !reponseAmbigue.trim()) { creer(); return; }
+    setVerification(true);
+    const res = await validerTexteLibre(titre.trim(), "titre d'événement d'agenda", reponseAmbigue.trim());
+    setVerification(false);
+    setReponseAmbigue("");
+    if (res.etat === "reformuler" || res.etat === "bloquer" || res.etat === "horssujet") { setFiltrage(res); return; }
+    creer();
   }
   return (
     <>
@@ -3429,10 +3454,31 @@ export default function TamiseApp() {
   // c'est-à-dire proposées par l'autre personne. Pour les tâches, la
   // confirmation (confirmation: attente/confirme) est distincte de
   // l'avancement (statut: pas_commence/en_cours/termine).
-  const agendaEnAttente = relations.reduce((n, r) => n + (r.agenda || []).filter((e) => e.statut === "attente" && e.proposePar === "autre").length, 0);
-  const depensesEnAttente = relations.reduce((n, r) => n + (r.depenses || []).filter((d) => d.validation === "attente" && d.proposePar === "autre").length, 0);
-  const tachesEnAttente = relations.reduce((n, r) => n + (r.groupesTaches || []).reduce((m, g) => m + (g.taches || []).filter((t) => t.confirmation === "attente" && t.proposePar === "autre").length, 0), 0);
+  const agendaEnAttente = relations.reduce((n, r) => n + (r.agenda || []).filter((e) => e.statut === "attente" && e.proposePar === "autre" && !(r.evenementsVus || []).includes(e.id)).length, 0);
+  const depensesEnAttente = relations.reduce((n, r) => n + (r.depenses || []).filter((d) => d.validation === "attente" && d.proposePar === "autre" && !(r.depensesVues || []).includes(d.id)).length, 0);
+  // Tâches avancées ET listes à cocher : les deux vivent dans l'onglet « Plus ».
+  const tachesEnAttente = relations.reduce((n, r) => {
+    const vues = r.tachesVues || [];
+    const t1 = (r.groupesTaches || []).reduce((m, g) => m + (g.taches || []).filter((t) => t.confirmation === "attente" && t.proposePar === "autre" && !vues.includes(t.id)).length, 0);
+    const t2 = (r.listes || []).reduce((m, l) => m + (l.items || []).filter((it) => it.confirmation === "attente" && it.proposePar === "autre" && !vues.includes(it.id)).length, 0);
+    return n + t1 + t2;
+  }, 0);
   const badges = { messages: messagesNonVus, agenda: agendaEnAttente, depenses: depensesEnAttente, plus: tachesEnAttente };
+
+  // Marque tâches et éléments de liste comme vus dès l'ouverture de l'écran
+  // Tâches — sans ça, la pastille de « Plus » ne s'éteindrait jamais.
+  useEffect(() => {
+    if (!(tab === "plus" && plusVue === "taches") || rel.id === "vide") return;
+    const vues = rel.tachesVues || [];
+    const aVoir = [];
+    (rel.groupesTaches || []).forEach((g) => (g.taches || []).forEach((t) => {
+      if (t.confirmation === "attente" && t.proposePar === "autre" && !vues.includes(t.id)) aVoir.push(t.id);
+    }));
+    (rel.listes || []).forEach((l) => (l.items || []).forEach((it) => {
+      if (it.confirmation === "attente" && it.proposePar === "autre" && !vues.includes(it.id)) aVoir.push(it.id);
+    }));
+    if (aVoir.length) patchRel({ tachesVues: [...vues, ...aVoir] });
+  }, [tab, plusVue, relId, rel.groupesTaches, rel.listes]);
 
   // Marque les messages comme vus en QUITTANT l'onglet Messages (ou en changeant
   // de relation) plutôt qu'en l'ouvrant — pour que la mise en évidence des
@@ -4172,13 +4218,15 @@ export default function TamiseApp() {
             <div style={{ display: "flex", gap: 6, alignItems: "center", overflowX: "auto" }}>
               {relations.map((r) => {
                 const actif = r.id === relId;
-                // Y a-t-il quelque chose de nouveau dans CETTE relation ?
+                // Y a-t-il quelque chose de NON ENCORE VU dans cette relation ?
+                // (et non « pas encore validé » : sinon la pastille resterait
+                // tant qu'on n'a pas tranché, même après avoir tout regardé)
                 const nouveaute =
                   (r.messages || []).slice(r.dernierVu || 0).some((m) => m.de === "autre")
-                  || (r.agenda || []).some((e) => e.statut === "attente" && e.proposePar === "autre")
-                  || (r.depenses || []).some((d) => d.validation === "attente" && d.proposePar === "autre")
-                  || (r.groupesTaches || []).some((g) => (g.taches || []).some((t) => t.confirmation === "attente" && t.proposePar === "autre"))
-                  || (r.listes || []).some((l) => (l.items || []).some((it) => it.confirmation === "attente" && it.proposePar === "autre"));
+                  || (r.agenda || []).some((e) => e.statut === "attente" && e.proposePar === "autre" && !(r.evenementsVus || []).includes(e.id))
+                  || (r.depenses || []).some((d) => d.validation === "attente" && d.proposePar === "autre" && !(r.depensesVues || []).includes(d.id))
+                  || (r.groupesTaches || []).some((g) => (g.taches || []).some((t) => t.confirmation === "attente" && t.proposePar === "autre" && !(r.tachesVues || []).includes(t.id)))
+                  || (r.listes || []).some((l) => (l.items || []).some((it) => it.confirmation === "attente" && it.proposePar === "autre" && !(r.tachesVues || []).includes(it.id)));
                 return (
                   <button key={r.id} onClick={() => { if (actif) { setGererRelOuvert(true); } else { setRelId(r.id); setVueDestinataire(false); setPlusVue("menu"); } }}
                     style={{
