@@ -12,7 +12,7 @@ import {
   Bell, ExternalLink, ClipboardList, PieChart, LogOut, Trash2, Pencil, Download,
   TrendingUp, Type, CheckCircle2, Circle, UserPlus, Database, Zap, ThumbsUp,
 } from "lucide-react";
-import { MECANISMES } from "./mecanismes.js";
+import { MECANISMES, AXES, FAMILLE_AXE } from "./mecanismes.js";
 
 /* ============================================================
    TAMISÉ — Prototype v2 (conforme au document maître Tamisé)
@@ -459,13 +459,14 @@ async function analyseAvecIA(text, rel) {
             "En cas de doute entre les deux, choisis toujours « problematique ». " +
             "« grave » = menace, intimidation, contenu illégal : jamais reformulé, jamais transmis. " +
             "MÉCANISMES À DÉTECTER (choisis le plus précis, une carte par mécanisme distinct, une même phrase peut en contenir plusieurs ; utilise EXACTEMENT ces noms, ils correspondent aux fiches du glossaire de l'app) : " +
-            "· Manipulation émotionnelle — Culpabilisation (faire porter la faute), Chantage affectif (conditionner son amour/sa présence), Menace, Honte, Victimisation, Flatterie intéressée, Future faking (promesses d'avenir non tenues). " +
-            "· Manipulation relationnelle — Isolement, Silence punitif, Stonewalling (mur du silence, refus d'échanger), Intermittence (chaud-froid) (compliment glissé au milieu de reproches — jamais un signe sain, ça crée de la confusion), Triangulation, Hoovering (tenter de faire revenir après une rupture), Campagne de diffamation, Comparaison rabaissante, Harcèlement (répétition, insistance). " +
-            "· Manipulation par le langage — Présupposé (affirmation glissée comme acquise), Recadrage (réécrire le sens pour effacer sa responsabilité), Généralisation (toujours/jamais), Injonction paradoxale (deux consignes incompatibles en même temps), Double contrainte (deux choix qui mènent tous deux à un reproche), Passif-agressif, Ordre flou (consigne vague puis reproche), Reproche ambigu (accusation qu'on ne peut ni réfuter ni réparer), Nuage d'encre (noyer une question gênante sous un flot de mots), Caricature (déformer les propos pour les rendre absurdes), \"Plus c'est gros, plus ça passe\" (contrevérité assénée avec aplomb), Pétition de principe (grands principes affichés, jamais appliqués). " +
-            "· Distorsion du réel — Gaslighting (nier des faits réels pour faire douter de sa mémoire), Minimisation, Renversement de responsabilité, Confusion (versions contradictoires qui empêchent de se positionner), Normalisation progressive, Poubelle psychique (tout ce qui va mal, c'est l'autre), \"Savoir mieux que toi\" (décréter ce que l'autre pense ou ressent). " +
-            "· Dévalorisation & identité — Dévalorisation, Étiquetage (décréter qui l'autre EST, pas ce qu'il fait). " +
-            "· Emprise, contrôle & pouvoir — Contrôle/Intrusion, Abus de pouvoir (utiliser une position pour contraindre), Droits spéciaux (se croire au-dessus des règles communes). " +
-            "· Biais cognitifs — Illusion de contrôle (croire qu'être parfait·e fera changer l'autre). " +
+            "· Pression émotionnelle et affective — Culpabilisation (faire porter la faute), Chantage affectif (conditionner son amour/sa présence), Menace, Honte, Victimisation, Flatterie intéressée, Future faking (promesses d'avenir non tenues). " +
+            "· Contrôle de la relation et de l'environnement — Isolement, Silence punitif, Stonewalling (mur du silence, refus d'échanger), Intermittence (chaud-froid) (compliment glissé au milieu de reproches — jamais un signe sain, ça crée de la confusion), Triangulation, Hoovering (tenter de faire revenir après une rupture), Campagne de diffamation, Comparaison rabaissante, Harcèlement (répétition, insistance), Instrumentalisation d'un tiers (utiliser quelqu'un comme messager forcé d'une pression ou d'une menace), Surveillance / monitoring (exiger un contrôle permanent des déplacements ou des messages). " +
+            "· Manipulation du discours et du raisonnement — Présupposé (affirmation glissée comme acquise), Recadrage (réécrire le sens pour effacer sa responsabilité), Généralisation (toujours/jamais), Injonction paradoxale (deux consignes incompatibles en même temps), Double contrainte (deux choix qui mènent tous deux à un reproche), Passif-agressif, Ordre flou (consigne vague puis reproche), Reproche ambigu (accusation qu'on ne peut ni réfuter ni réparer), Nuage d'encre (noyer une question gênante sous un flot de mots), Caricature (déformer les propos pour les rendre absurdes), \"Plus c'est gros, plus ça passe\" (contrevérité assénée avec aplomb), Pétition de principe (grands principes affichés, jamais appliqués), Ambiguïté / flou (rester vague pour pouvoir tout nier ensuite), Fausse question / question orientée (la formulation impose déjà la réponse attendue), Fausse équivalence (mettre sur le même plan deux choses très différentes), Whataboutism (répondre à un reproche en accusant en retour plutôt qu'en s'expliquant). " +
+            "· Altération de la réalité et de la responsabilité — Gaslighting (nier des faits réels pour faire douter de sa mémoire), Minimisation, Renversement de responsabilité, Confusion (versions contradictoires qui empêchent de se positionner), Normalisation progressive, Poubelle psychique (tout ce qui va mal, c'est l'autre), \"Savoir mieux que toi\" (décréter ce que l'autre pense ou ressent), Réécriture du passé (nier ou modifier un événement réel pour faire douter de sa mémoire). " +
+            "· Dévalorisation et atteinte à l'identité — Dévalorisation, Étiquetage (décréter qui l'autre EST, pas ce qu'il fait). " +
+            "· Pouvoir, domination et emprise — Contrôle/Intrusion, Abus de pouvoir (utiliser une position pour contraindre), Droits spéciaux (se croire au-dessus des règles communes). " +
+            "· Biais cognitifs favorisant la prise ou le maintien — Illusion de contrôle (croire qu'être parfait·e fera changer l'autre). " +
+            "· Mécanismes d'attachement et de maintien dans la relation — Dépendance affective (faire croire qu'on ne peut vivre sans l'autre, que personne d'autre ne voudra de vous). " +
             "NUANCE OBLIGATOIRE : un message peut être parfaitement sain, maladroit sans être manipulateur, ou juste ambigu — ne force jamais une lecture toxique si elle n'y est pas ; niveau sain + detections [] est une réponse valide et bonne. Mieux vaut 2-3 cartes justes que 6 approximatives. " +
             "MESSAGES ORDINAIRES DU QUOTIDIEN — RÈGLE ABSOLUE : l'immense majorité des échanges sont banals et parfaitement sains. Une demande simple (« tu peux prendre du pain ? »), un accord, un remerciement, une confirmation, une question pratique, une info logistique → TOUJOURS niveau \"sain\", detections []. " +
             "Les formules courtes de politesse ou d'assentiment du français courant sont TOUJOURS saines et ne contiennent JAMAIS de mécanisme, quelle que soit leur forme : « pas de souci », « pas de soucis », « ok », « ça marche », « d'accord », « très bien », « c'est noté », « comme tu veux », « je m'en occupe », « merci », « de rien », « à toute », « bisous », « oui », « non », « ça roule », « nickel », « parfait », « je te dis quoi », « on fait comme ça ». Ne cherche JAMAIS un enjeu de pouvoir, une soumission, un sous-entendu ou une manipulation dans ce genre de formule : c'est du langage ordinaire, pas un signal. Une réponse brève n'est pas un signe de froideur, de mur du silence ou de passif-agressif. " +
@@ -575,17 +576,21 @@ async function coachIA(history, question, rel) {
 Tu tutoies TOUJOURS la personne, dès le premier mot : "tu", "toi", "ton", "ta", "tes" — jamais "vous", "votre", "vos". Si tu te surprends à vouvoyer, corrige-toi aussitôt.
 
 # Ta base de connaissances (pour comprendre en profondeur, pas pour étaler)
-Le glossaire de l'app (accessible aux personnes dans Se repérer → Comprendre les mécanismes) couvre 104 mécanismes en 10 familles. Tu les connais finement et peux t'en servir pour analyser une situation qu'on te raconte, pas seulement un message isolé :
-- Manipulation émotionnelle : culpabilisation, chantage affectif, menace, honte, victimisation, flatterie intéressée, love bombing, future faking, climat de terreur, vol de la joie, prophétie, cadeau empoisonné, réciprocité contrainte, abus de confiance.
-- Manipulation relationnelle : isolement, silence punitif, stonewalling, intermittence chaud-froid, triangulation, ferrage, hoovering, campagne de diffamation, comparaison rabaissante, semer la zizanie, harcèlement, double visage, flagrant délit.
-- Manipulation par le langage : présupposé, recadrage, généralisation, injonction paradoxale, double contrainte, passif-agressif, ordre flou, reproche ambigu, nuage d'encre, caricature, "plus c'est gros plus ça passe", pétition de principe.
-- Distorsion du réel : gaslighting, mensonge et déni, minimisation, renversement de responsabilité, projection, confusion, normalisation progressive, DARVO, poubelle psychique, "savoir mieux que toi".
-- Dévalorisation & attaque de l'identité : dévalorisation, étiquetage, humiliation, sarcasme/mépris, attaque par surprise, utilisation d'un public, écoute aversive, déni de l'autre, maladresse volontaire.
-- Emprise, contrôle & pouvoir : emprise, cycle de la violence, lune de miel, contrôle coercitif, contrôle/intrusion, abus de pouvoir, droits spéciaux, redéfinition des rôles, imposture, sabotage, vol du territoire, pression sexuelle, rivalité avec l'enfant, climat incestuel — ces deux derniers, et la pression sexuelle, sont des sujets graves : jamais de diagnostic, orientation systématique vers un professionnel si la personne semble concernée.
-- Techniques d'engagement progressif : porte-au-nez, amorçage (low-ball), pied dans la porte.
-- Leviers d'influence (Cialdini) : réciprocité, preuve sociale, autorité, rareté/peur de perdre, sympathie, engagement et cohérence, unité/appartenance.
-- Biais cognitifs : confirmation, coûts irrécupérables, effet de halo, optimisme, ancrage, aversion à la perte, cadrage, habituation, illusion de contrôle, conformisme, croyance en un monde juste, erreur d'attribution.
-- Effets sur soi & santé mentale : dissonance cognitive, lien traumatique, hypervigilance, charge mentale, impuissance acquise, perte d'estime de soi, rationalisation, dissociation, identification à l'agresseur, sidération.
+Le glossaire de l'app (accessible aux personnes dans Se repérer → Comprendre les mécanismes) couvre 133 mécanismes, organisés en 2 axes et 10 familles. Tu les connais finement et peux t'en servir pour analyser une situation qu'on te raconte, pas seulement un message isolé :
+
+AXE 1 — CE QUE FAIT L'AUTEUR :
+- Pression émotionnelle et affective : culpabilisation, chantage affectif, menace, honte, victimisation, flatterie intéressée, love bombing, future faking, climat de terreur, vol de la joie, prophétie, cadeau empoisonné, réciprocité contrainte, abus de confiance.
+- Contrôle de la relation et de l'environnement : isolement, silence punitif, stonewalling, intermittence chaud-froid, triangulation, ferrage, hoovering, campagne de diffamation, comparaison rabaissante, semer la zizanie, harcèlement, double visage, flagrant délit, instrumentalisation d'un tiers, surveillance/monitoring, contrôle économique, contrôle de l'information, gatekeeping relationnel, privation/perturbation volontaire du sommeil, punition imprévisible, test de limites, escalade graduelle des exigences.
+- Manipulation du discours et du raisonnement : présupposé, recadrage, généralisation, injonction paradoxale, double contrainte, passif-agressif, ordre flou, reproche ambigu, nuage d'encre, caricature, "plus c'est gros plus ça passe", pétition de principe, ambiguïté/flou, fausse question/question orientée, fausse équivalence, whataboutism, déplacement des poteaux (moving the goalposts).
+- Altération de la réalité et de la responsabilité : gaslighting, mensonge et déni, minimisation, renversement de responsabilité, projection, confusion, normalisation progressive, DARVO, poubelle psychique, "savoir mieux que toi", réécriture du passé.
+- Dévalorisation et atteinte à l'identité : dévalorisation, étiquetage, humiliation, sarcasme/mépris, attaque par surprise, utilisation d'un public, écoute aversive, déni de l'autre, maladresse volontaire.
+- Pouvoir, domination et emprise : contrôle coercitif, contrôle/intrusion, abus de pouvoir, droits spéciaux, redéfinition des rôles, imposture, sabotage, vol du territoire, pression sexuelle, rivalité avec l'enfant, climat incestuel, séduction narcissique — climat incestuel, rivalité avec l'enfant et pression sexuelle sont des sujets graves : jamais de diagnostic, orientation systématique vers un professionnel si la personne semble concernée.
+- Techniques d'influence et d'engagement : porte-au-nez, amorçage (low-ball), pied dans la porte, réciprocité, preuve sociale, autorité, rareté/peur de perdre, sympathie, principe de cohérence, unité/appartenance, surcharge/urgence, fausse urgence, influence informationnelle, manipulation médiatique, manipulation algorithmique, nudges, ingénierie sociale.
+
+AXE 2 — CE QUE ÇA PRODUIT CHEZ LA CIBLE :
+- Mécanismes d'attachement et de maintien dans la relation : dépendance affective, emprise, cycle de la violence, lune de miel, triangle de Karpman, renforcement intermittent, dissonance cognitive, lien traumatique, rationalisation, identification à l'agresseur.
+- Effets psychologiques et cognitifs : hypervigilance, charge mentale, impuissance acquise, perte d'estime de soi, dissociation, sidération, vulnérabilité biocomportementale.
+- Biais cognitifs favorisant la prise ou le maintien : confirmation, coûts irrécupérables, effet de halo, optimisme, ancrage, aversion à la perte, cadrage, habituation, illusion de contrôle, conformisme, croyance en un monde juste, erreur d'attribution, disponibilité, biais du statu quo.
 Tu peux nommer un mécanisme et l'expliquer en mots simples, sans jargon, dès que ça aide la personne à comprendre ce qu'elle vit — que ce soit à partir d'un message précis ou d'une situation qu'elle te raconte en plusieurs phrases.
 Quel que soit le mécanisme, tu ne poses JAMAIS ça comme un diagnostic sur une personne ("il/elle EST manipulateur·rice"), toujours comme une grille de lecture sur une situation ou un comportement précis. Les concepts les plus cliniques (triangle de Karpman, emprise, lien traumatique, séduction narcissique) restent réservés à une explication approfondie, seulement si la personne creuse vraiment.
 
@@ -2639,7 +2644,7 @@ function RpHome({ go, onExit }) {
       </button>
 
       <div style={{ height: 26 }} />
-      <RpSectionTitle title="Comprendre les mécanismes" onAction={() => go({ name: "mecaList" })} />
+      <RpSectionTitle title="Comprendre les mécanismes" onAction={() => go({ name: "mecaAxes" })} />
       <p style={{ fontSize: 13, color: C.inkSoft, margin: "0 0 12px" }}>Des définitions claires pour décrypter les comportements toxiques.</p>
       <RpCarousel items={MECANISMES} render={(m, i) => {
         const Ic = m.icon;
@@ -2727,67 +2732,130 @@ function RpQcm({ module, back, genre }) {
   );
 }
 
-// Étiquette courte pour les onglets de catégorie : le premier mot seul ne
-// suffit plus à distinguer les familles depuis l'enrichissement du glossaire
-// (trois catégories commencent par « Manipulation »).
-const LABEL_CAT_COURT = {
-  "Manipulation émotionnelle": "Émotionnelle",
-  "Manipulation relationnelle": "Relationnelle",
-  "Manipulation par le langage": "Langage",
-  "Distorsion du réel": "Distorsion",
-  "Dévalorisation & attaque de l'identité": "Dévalorisation",
-  "Emprise, contrôle & pouvoir": "Emprise",
-  "Techniques d'engagement progressif": "Engagement",
-  "Leviers d'influence": "Influence",
-  "Biais cognitifs": "Biais",
-  "Effets sur soi & santé mentale": "Effets sur soi",
+// Étiquette courte et percutante pour les 2 axes de « Se repérer ».
+// Clé = valeur exacte de FAMILLE_AXE (mecanismes.js) ; valeur = ce qui s'affiche.
+const AXE_LABEL_COURT = {
+  "Ce que fait l'auteur": "Ce que fait l'auteur",
+  "Ce que ça produit chez la cible": "Ce que ça déclenche",
 };
 
-function RpMecaList({ go, back }) {
-  const [query, setQuery] = useState("");
-  const [cat, setCat] = useState("Tout");
-  const cats = ["Tout", ...Array.from(new Set(MECANISMES.map((m) => m.cat)))];
-  const q = query.trim().toLowerCase();
-  const filtered = MECANISMES.map((m, i) => ({ m, i }))
-    .filter(({ m }) => cat === "Tout" || m.cat === cat)
-    .filter(({ m }) => !q || (m.mot + " " + m.court + " " + m.def).toLowerCase().includes(q));
-  // Regroupées par catégorie (ordre d'apparition conservé), triées alphabétiquement à l'intérieur de chacune.
-  const groupes = cats.slice(1)
-    .map((c) => ({ cat: c, items: filtered.filter(({ m }) => m.cat === c).sort((a, b) => a.m.mot.localeCompare(b.m.mot, "fr")) }))
-    .filter((g) => g.items.length > 0);
+// Étiquette courte et percutante pour chaque famille (sous-catégorie) de « Se repérer ».
+const LABEL_CAT_COURT = {
+  "Pression émotionnelle et affective": "Pression émotionnelle",
+  "Contrôle de la relation et de l'environnement": "Contrôle relationnel",
+  "Manipulation du discours et du raisonnement": "Manipulation du discours",
+  "Altération de la réalité et de la responsabilité": "Altération de la réalité",
+  "Dévalorisation et atteinte à l'identité": "Dévalorisation identitaire",
+  "Pouvoir, domination et emprise": "Pouvoir et domination",
+  "Techniques d'influence et d'engagement": "Influence et engagement",
+  "Mécanismes d'attachement et de maintien dans la relation": "Attachement et maintien",
+  "Effets psychologiques et cognitifs": "Effets psychologiques",
+  "Biais cognitifs favorisant la prise ou le maintien": "Biais cognitifs",
+};
+
+// ---- Navigation à 3 niveaux : axe → famille → liste alphabétique ----
+
+function RpMecaCarte({ titre, sousTitre, onClick, gros }) {
+  return (
+    <button onClick={onClick} style={{ width: "100%", textAlign: "left", background: C.card, borderRadius: gros ? 20 : 18, padding: gros ? "20px 18px" : "16px 17px", border: "none", cursor: "pointer", fontFamily: "inherit", boxShadow: "0 4px 14px rgba(69,62,54,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14 }}>
+      <div>
+        <div style={{ fontFamily: gros ? "'Fraunces', serif" : "inherit", fontWeight: gros ? 400 : 700, fontSize: gros ? 18 : 15, color: C.ink, marginBottom: 4 }}>{titre}</div>
+        <div style={{ fontSize: 12.5, color: C.inkSoft }}>{sousTitre}</div>
+      </div>
+      <ChevronRight size={gros ? 19 : 18} color={C.taupe} style={{ flexShrink: 0 }} />
+    </button>
+  );
+}
+
+function RpMecaMotCarte({ m, i, onClick }) {
+  const Ic = m.icon;
+  return (
+    <button key={i} onClick={onClick} style={{ width: "100%", textAlign: "left", background: C.card, borderRadius: 18, padding: "15px 16px", border: "none", cursor: "pointer", fontFamily: "inherit", boxShadow: "0 4px 14px rgba(69,62,54,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
+        <span style={{ width: 40, height: 40, borderRadius: 11, background: C.beigeSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Ic size={19} color={C.taupe} strokeWidth={2} /></span>
+        <div><p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 15.5, color: C.ink }}>{m.mot}</p><p style={{ margin: 0, fontSize: 13, color: C.inkSoft, lineHeight: 1.35 }}>{m.court}</p></div>
+      </div>
+      <ChevronRight size={18} color={C.taupe} style={{ flexShrink: 0 }} />
+    </button>
+  );
+}
+
+// Niveau 1 : les 2 grands axes.
+function RpMecaAxes({ go, back }) {
   return (
     <div className="voile">
       <RpHeader title="Comprendre les mécanismes" sub="Des définitions claires pour décrypter les comportements toxiques." onBack={back} />
-      <div style={{ display: "flex", alignItems: "center", gap: 10, background: C.card, borderRadius: 18, padding: "11px 15px", marginBottom: 14, boxShadow: "0 4px 14px rgba(69,62,54,0.05)" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {AXES.map((axe) => {
+          const nbFamilles = Object.keys(FAMILLE_AXE).filter((f) => FAMILLE_AXE[f] === axe).length;
+          const nbMeca = MECANISMES.filter((m) => FAMILLE_AXE[m.cat] === axe).length;
+          return (
+            <RpMecaCarte key={axe} gros titre={AXE_LABEL_COURT[axe] || axe}
+              sousTitre={`${nbFamilles} famille${nbFamilles > 1 ? "s" : ""} · ${nbMeca} mécanisme${nbMeca > 1 ? "s" : ""}`}
+              onClick={() => go({ name: "mecaFamilies", axe })} />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Niveau 2 : les familles d'un axe (+ recherche transversale à cet axe).
+function RpMecaFamilies({ axe, go, back }) {
+  const [query, setQuery] = useState("");
+  const familles = Object.keys(FAMILLE_AXE).filter((f) => FAMILLE_AXE[f] === axe);
+  const q = query.trim().toLowerCase();
+  const resultats = q
+    ? MECANISMES.map((m, i) => ({ m, i }))
+        .filter(({ m }) => FAMILLE_AXE[m.cat] === axe)
+        .filter(({ m }) => (m.mot + " " + m.court + " " + m.def).toLowerCase().includes(q))
+        .sort((a, b) => a.m.mot.localeCompare(b.m.mot, "fr"))
+    : null;
+  return (
+    <div className="voile">
+      <RpHeader title={AXE_LABEL_COURT[axe] || axe} sub="Choisis une famille pour voir ses mécanismes." onBack={back} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, background: C.card, borderRadius: 18, padding: "11px 15px", marginBottom: 16, boxShadow: "0 4px 14px rgba(69,62,54,0.05)" }}>
         <Search size={17} color={C.inkSoft} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher un mot…" style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 15, color: C.ink, fontFamily: "inherit" }} />
         {query && <button onClick={() => setQuery("")} style={{ border: "none", background: "transparent", color: C.inkSoft, cursor: "pointer", padding: 0 }}>✕</button>}
       </div>
-      <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 18, margin: "0 -18px 18px", padding: "0 18px 6px" }}>
-        {cats.map((c) => (
-          <button key={c} onClick={() => setCat(c)} style={{ flexShrink: 0, border: "none", borderRadius: 999, padding: "8px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", background: cat === c ? C.taupe : C.beigeSoft, color: cat === c ? "#fff" : C.taupe }}>{c === "Tout" ? "Tout" : (LABEL_CAT_COURT[c] || c.split(" ")[0])}</button>
+      {resultats ? (
+        <>
+          {resultats.length === 0 && <p style={{ fontSize: 14, color: C.inkSoft, textAlign: "center", padding: "18px 0" }}>Aucun mot ne correspond à « {query} ».</p>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {resultats.map(({ m, i }) => (
+              <RpMecaMotCarte key={i} m={m} i={i} onClick={() => go({ name: "meca", i, from: "familyList", axe, famille: m.cat })} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {familles.map((f) => {
+            const nb = MECANISMES.filter((m) => m.cat === f).length;
+            return (
+              <RpMecaCarte key={f} titre={LABEL_CAT_COURT[f] || f} sousTitre={`${nb} mécanisme${nb > 1 ? "s" : ""}`}
+                onClick={() => go({ name: "mecaList", axe, famille: f })} />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Niveau 3 : la liste alphabétique d'une famille.
+function RpMecaList({ axe, famille, go, back }) {
+  const items = MECANISMES.map((m, i) => ({ m, i }))
+    .filter(({ m }) => m.cat === famille)
+    .sort((a, b) => a.m.mot.localeCompare(b.m.mot, "fr"));
+  return (
+    <div className="voile">
+      <RpHeader title={LABEL_CAT_COURT[famille] || famille} sub={`${items.length} mécanisme${items.length > 1 ? "s" : ""}, par ordre alphabétique.`} onBack={back} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {items.map(({ m, i }) => (
+          <RpMecaMotCarte key={i} m={m} i={i} onClick={() => go({ name: "meca", i, from: "familyList", axe, famille })} />
         ))}
       </div>
-      {groupes.length === 0 && <p style={{ fontSize: 14, color: C.inkSoft, textAlign: "center", padding: "18px 0" }}>Aucun mot ne correspond à « {query} ».</p>}
-      {groupes.map((g, gi) => (
-        <div key={g.cat} style={{ marginBottom: 18 }}>
-          {cat === "Tout" && <div style={{ fontFamily: "'Fraunces', serif", fontSize: 14.5, color: C.taupe, margin: "0 2px 10px" }}>{g.cat}</div>}
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {g.items.map(({ m, i }) => {
-              const Ic = m.icon;
-              return (
-                <button key={i} onClick={() => go({ name: "meca", i, from: "list" })} style={{ width: "100%", textAlign: "left", background: C.card, borderRadius: 18, padding: "15px 16px", border: "none", cursor: "pointer", fontFamily: "inherit", boxShadow: "0 4px 14px rgba(69,62,54,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-                    <span style={{ width: 40, height: 40, borderRadius: 11, background: C.beigeSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Ic size={19} color={C.taupe} strokeWidth={2} /></span>
-                    <div><p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 15.5, color: C.ink }}>{m.mot}</p><p style={{ margin: 0, fontSize: 13, color: C.inkSoft, lineHeight: 1.35 }}>{m.court}</p></div>
-                  </div>
-                  <ChevronRight size={18} color={C.taupe} style={{ flexShrink: 0 }} />
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
@@ -2798,7 +2866,7 @@ function RpMecaDetail({ item, back, backLabel, onCoach }) {
     <div className="voile">
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
         <span style={{ width: 40, height: 40, borderRadius: 11, background: C.taupe, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Ic size={19} color="#fff" strokeWidth={2} /></span>
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: C.taupe, textTransform: "uppercase", letterSpacing: 0.5 }}>{item.cat}</span>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: C.taupe, textTransform: "uppercase", letterSpacing: 0.5 }}>{LABEL_CAT_COURT[item.cat] || item.cat}</span>
       </div>
       <RpHeader title={item.mot} sub={item.court} onBack={back} />
       <div style={{ background: C.card, borderRadius: 18, padding: 18, boxShadow: "0 4px 14px rgba(69,62,54,0.05)" }}>
@@ -2892,8 +2960,16 @@ function SeReperer({ onExit, onCoach, genre }) {
   if (view.name === "home") return <RpHome go={go} onExit={onExit} />;
   if (view.name === "qcmList") return <RpQcmList go={go} back={onExit} />;
   if (view.name === "qcm") return <RpQcm module={QCM_MODULES[view.i]} genre={genre} back={() => go(view.from === "list" ? { name: "qcmList" } : { name: "home" })} />;
-  if (view.name === "mecaList") return <RpMecaList go={go} back={() => go({ name: "home" })} />;
-  if (view.name === "meca") return <RpMecaDetail item={MECANISMES[view.i]} backLabel={view.from === "list" ? "Tous les mécanismes" : "Se repérer"} back={() => go(view.from === "list" ? { name: "mecaList" } : { name: "home" })} onCoach={onCoach} />;
+  if (view.name === "mecaAxes") return <RpMecaAxes go={go} back={() => go({ name: "home" })} />;
+  if (view.name === "mecaFamilies") return <RpMecaFamilies axe={view.axe} go={go} back={() => go({ name: "mecaAxes" })} />;
+  if (view.name === "mecaList") return <RpMecaList axe={view.axe} famille={view.famille} go={go} back={() => go({ name: "mecaFamilies", axe: view.axe })} />;
+  if (view.name === "meca") {
+    const backLabel = view.from === "familyList" ? (LABEL_CAT_COURT[view.famille] || view.famille) : "Se repérer";
+    const retour = view.from === "familyList"
+      ? () => go({ name: "mecaList", axe: view.axe, famille: view.famille })
+      : () => go({ name: "home" });
+    return <RpMecaDetail item={MECANISMES[view.i]} backLabel={backLabel} back={retour} onCoach={onCoach} />;
+  }
   if (view.name === "violento") return <RpViolento back={() => go({ name: "home" })} />;
   if (view.name === "aide") return <RpAide item={RESSOURCES[view.i]} back={() => go({ name: "home" })} />;
   return null;
@@ -3464,6 +3540,11 @@ export default function TamiseApp() {
     return n + t1 + t2;
   }, 0);
   const badges = { messages: messagesNonVus, agenda: agendaEnAttente, depenses: depensesEnAttente, plus: tachesEnAttente };
+  // Même chose mais uniquement pour la relation actuellement ouverte (pas le total
+  // toutes relations confondues) : sert à la pastille de la tuile « Tâches » du menu Plus.
+  const tachesEnAttenteRel =
+    (rel.groupesTaches || []).some((g) => (g.taches || []).some((t) => t.confirmation === "attente" && t.proposePar === "autre" && !(rel.tachesVues || []).includes(t.id)))
+    || (rel.listes || []).some((l) => (l.items || []).some((it) => it.confirmation === "attente" && it.proposePar === "autre" && !(rel.tachesVues || []).includes(it.id)));
 
   // Marque tâches et éléments de liste comme vus dès l'ouverture de l'écran
   // Tâches — sans ça, la pastille de « Plus » ne s'éteindrait jamais.
@@ -4539,9 +4620,13 @@ export default function TamiseApp() {
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                     {communs.map((e) => {
                       const Ic = e.icone;
+                      const aNotifier = e.id === "taches" && tachesEnAttenteRel;
                       return (
                         <Card key={e.id} onClick={() => setPlusVue(e.id)} style={{ cursor: "pointer", padding: 15, textAlign: "center" }}>
-                          <div style={{ background: C.beigeSoft, borderRadius: 14, width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 9px" }}><Ic size={18} color={C.taupe} /></div>
+                          <div style={{ position: "relative", width: 40, height: 40, margin: "0 auto 9px" }}>
+                            <div style={{ background: C.beigeSoft, borderRadius: 14, width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center" }}><Ic size={18} color={C.taupe} /></div>
+                            {aNotifier && <span style={{ position: "absolute", top: -2, right: -2, width: 10, height: 10, borderRadius: 999, background: C.brick, border: "1.5px solid " + C.card }} />}
+                          </div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>{e.titre}</div>
                         </Card>
                       );
@@ -4757,15 +4842,20 @@ export default function TamiseApp() {
                     </button>
                     {liste.ouverte && (
                       <div style={{ padding: "0 16px 14px" }}>
-                        {liste.items.map((it) => (
-                          <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0" }}>
+                        {liste.items.map((it) => {
+                          // Nouvel élément ajouté par l'autre personne, pas encore vu : même
+                          // mise en évidence que les tâches avancées et les dépenses en attente.
+                          const nouveau = it.confirmation === "attente" && it.proposePar === "autre";
+                          return (
+                          <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 8px", margin: nouveau ? "2px 0" : 0, borderRadius: nouveau ? 12 : 0, background: nouveau ? "#F6ECD9" : "none" }}>
                             <button onClick={() => toggleItemListe(liste.id, it.id)} aria-label="Cocher" style={{ border: "none", background: "none", cursor: "pointer", padding: 0, display: "flex", flexShrink: 0 }}>
                               {it.fait ? <CheckCircle2 size={19} color={COULEURS_LISTE[liste.couleur]} /> : <Circle size={19} color={C.grey} />}
                             </button>
                             <span style={{ flex: 1, fontSize: 13.5, color: it.fait ? C.inkSoft : C.ink, textDecoration: it.fait ? "line-through" : "none" }}>{it.texte}</span>
                             <button onClick={() => supprimerItemListe(liste.id, it.id)} aria-label="Retirer" style={{ border: "none", background: "none", cursor: "pointer", color: C.inkSoft, padding: 0, flexShrink: 0 }}><X size={14} /></button>
                           </div>
-                        ))}
+                          );
+                        })}
                         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                           <input value={saisieItem[liste.id] || ""} onChange={(e) => setSaisieItem({ ...saisieItem, [liste.id]: e.target.value })}
                             onKeyDown={(e) => { if (e.key === "Enter" && (saisieItem[liste.id] || "").trim()) { ajouterItemListe(liste.id, saisieItem[liste.id].trim()); setSaisieItem({ ...saisieItem, [liste.id]: "" }); } }}
