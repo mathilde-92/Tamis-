@@ -326,7 +326,8 @@ async function validerTexteLibre(texte, quoi, precision) {
       "\"reformuler\" = contient une insulte, une vulgarité, un reproche, un sarcasme, une pique ou un mécanisme de manipulation visant l'autre personne → propose une version neutre qui garde l'information utile et retire ce qui blesse (si rien d'utile ne reste, mets reformulation à null) ; " +
       "\"bloquer\" = contient une menace explicite ou implicite, une intimidation, ou un contenu illégal. " +
       "Pour \"reformuler\" et \"bloquer\", donne aussi \"besoinProbable\" : ta meilleure hypothèse sur le besoin réel derrière ces mots, formulée pour compléter « ce dont tu as besoin, c'est ... » (groupe nominal court et concret, fondé sur ce qui est écrit). " +
-      "Réponds UNIQUEMENT en JSON strict, sans backticks : {\"etat\": \"valide\"|\"ambigu\"|\"horssujet\"|\"reformuler\"|\"bloquer\", \"raison\": \"1 phrase courte et douce expliquant pourquoi, si etat n'est pas valide — sinon null\", \"question\": \"1 question courte si ambigu, sinon null\", \"reformulation\": \"la version neutre si reformuler, sinon null\", \"besoinProbable\": \"le besoin si reformuler ou bloquer, sinon null\"}. " +
+      "Pour \"reformuler\" et \"bloquer\", donne AUSSI \"detections\" : la liste des passages problématiques du texte d'origine. Chaque entrée = {\"passage\": \"les mots EXACTS recopiés du texte, sans rien changer ni reformuler\", \"type\": \"le nom du mécanisme\", \"explication\": \"1 phrase simple, adressée à la personne qui LIT ce texte, expliquant ce que ce passage cherche à produire chez elle\"}. Le passage doit se retrouver mot pour mot dans le texte d'origine, sinon ne le mets pas. Si etat est \"valide\", \"ambigu\" ou \"horssujet\", mets une liste vide. " +
+      "Réponds UNIQUEMENT en JSON strict, sans backticks : {\"etat\": \"valide\"|\"ambigu\"|\"horssujet\"|\"reformuler\"|\"bloquer\", \"raison\": \"1 phrase courte et douce expliquant pourquoi, si etat n'est pas valide — sinon null\", \"question\": \"1 question courte si ambigu, sinon null\", \"reformulation\": \"la version neutre si reformuler, sinon null\", \"besoinProbable\": \"le besoin si reformuler ou bloquer, sinon null\", \"detections\": []}. " +
       "Texte : " + JSON.stringify(texte);
     const rep = await appellerIA(prompt, 350);
     const res = JSON.parse(rep.replace(/```json|```/g, "").trim());
@@ -338,12 +339,17 @@ async function validerTexteLibre(texte, quoi, precision) {
       question: res.question || null,
       reformulation: res.reformulation || null,
       besoinProbable: res.besoinProbable || null,
+      // Passages repérés dans le texte d'origine : ils servent au surlignage
+      // chez la personne qui reçoit, quand son niveau de protection le permet.
+      detections: Array.isArray(res.detections)
+        ? res.detections.filter((d) => d && d.passage && d.type)
+        : [],
     };
   } catch (e) {
     // Si la vérification échoue (hors ligne, IA indisponible), on n'empêche
     // jamais quelqu'un d'enregistrer une vraie dépense ou tâche à cause d'un
     // problème technique — on laisse passer.
-    return { etat: "valide", raison: null, question: null, reformulation: null, besoinProbable: null };
+    return { etat: "valide", raison: null, question: null, reformulation: null, besoinProbable: null, detections: [] };
   }
 }
 
@@ -1297,6 +1303,7 @@ const PRIORITE_TACHE = {
 };
 const MODELES_GARDE = [
   { type: "semaine", label: "Semaine / semaine", desc: "Les parents alternent des semaines complètes." },
+  { type: "quinzaine", label: "2 semaines / 2 semaines", desc: "Les parents alternent des blocs de deux semaines." },
   { type: "2-2-3", label: "2-2-3", desc: "Deux jours, deux jours, trois jours, en alternance." },
   { type: "weekend-alterne", label: "Un week-end sur deux", desc: "Un parent a la semaine, les week-ends alternent." },
   { type: "semaine-weekend", label: "Semaine / week-end", desc: "Un parent a toujours la semaine, l'autre le week-end." },
@@ -1318,6 +1325,11 @@ function quiALaGarde(modeGarde, dateISO) {
     case "semaine": {
       const semaine = Math.floor(jours / 7);
       return semaine % 2 === 0 ? demarrePar : autre;
+    }
+    case "quinzaine": {
+      // Blocs de 14 jours : le même parent garde deux semaines d'affilée.
+      const bloc = Math.floor(jours / 14);
+      return bloc % 2 === 0 ? demarrePar : autre;
     }
     case "2-2-3": {
       const motif = ["moi", "moi", "autre", "autre", "moi", "moi", "moi", "autre", "autre", "moi", "autre", "autre", "autre", "moi"];
@@ -1594,8 +1606,13 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
   const m = parseFloat((montant || "").replace(",", "."));
   const ok = nom.trim() && m > 0;
   const etaitConfirmee = ed && ed.validation === "confirme";
-  function creer(nomFinal) {
-    onCreate({ nom: (nomFinal || nom).trim(), montant: m, cat: cat[0], payePar, info: ed ? ed.info : "Dépense ajoutée manuellement. Le partage par défaut est 50/50 ; ajuste selon ton jugement ou votre accord. Informations indicatives." });
+  function creer(nomFinal, detections) {
+    const original = nom.trim();
+    const retenu = (nomFinal || nom).trim();
+    // Si l'intitulé a été adouci, on garde le texte de départ ET les passages
+    // repérés dedans : c'est ce qui permettra à l'autre personne de voir ce qui
+    // lui était adressé, surligné, si son niveau de protection le permet.
+    onCreate({ nom: retenu, montant: m, cat: cat[0], payePar, info: ed ? ed.info : "Dépense ajoutée manuellement. Le partage par défaut est 50/50 ; ajuste selon ton jugement ou votre accord. Informations indicatives.", ...(retenu !== original ? { texteOriginal: original, detections: detections || [] } : {}) });
   }
   async function valider() {
     if (!ok) return;
@@ -1657,7 +1674,7 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
       )}
 
       <BlocFiltrage resultat={filtrage}
-        onAccepterReformulation={(t) => { setFiltrage(null); setNom(t); creer(t); }}
+        onAccepterReformulation={(t) => { const d = filtrage && filtrage.detections; setFiltrage(null); setNom(t); creer(t, d); }}
         onReecrire={() => { setFiltrage(null); setNom(""); }}
         onAnnuler={onClose} />
 
@@ -2204,8 +2221,12 @@ function TacheSheet({ tache, onSave, onDelete, onClose }) {
   const [questionAmbigue, setQuestionAmbigue] = useState(null);
   const [reponseAmbigue, setReponseAmbigue] = useState("");
   const [filtrage, setFiltrage] = useState(null);
-  function creer(nomFinal) {
-    onSave({ nom: (nomFinal || nom).trim(), statut, priorite, echeance: echeance || null });
+  function creer(nomFinal, detections) {
+    const original = nom.trim();
+    const retenu = (nomFinal || nom).trim();
+    // Nom adouci : on garde le texte de départ et les passages repérés dedans,
+    // pour que l'autre personne puisse voir ce qui lui était adressé.
+    onSave({ nom: retenu, statut, priorite, echeance: echeance || null, ...(retenu !== original ? { texteOriginal: original, detections: detections || [] } : {}) });
   }
   async function valider() {
     if (!nom.trim()) return;
@@ -2276,6 +2297,13 @@ function TacheSheet({ tache, onSave, onDelete, onClose }) {
           <div style={{ fontSize: 12.5, color: C.brick, lineHeight: 1.5 }}>{erreurContenu}</div>
         </div>
       )}
+
+      {/* Sans ce bloc, un nom de tâche refusé faisait disparaître le bouton
+          sans rien afficher : la personne restait bloquée sans explication. */}
+      <BlocFiltrage resultat={filtrage}
+        onAccepterReformulation={(t) => { const d = filtrage && filtrage.detections; setFiltrage(null); setNom(t); creer(t, d); }}
+        onReecrire={() => { setFiltrage(null); setNom(""); }}
+        onAnnuler={onClose} />
 
       {!questionAmbigue && !filtrage && (
       <button onClick={valider} disabled={!nom.trim() || verification} style={{ width: "100%", border: "none", cursor: nom.trim() && !verification ? "pointer" : "default", background: nom.trim() && !verification ? C.taupe : C.grey, color: nom.trim() && !verification ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", marginBottom: tache ? 10 : 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
@@ -2487,10 +2515,14 @@ function AjoutEvenement({ dateDefaut, evenement, type, aDesEnfants, onClose, onC
   const [filtrage, setFiltrage] = useState(null);
   const [questionAmbigue, setQuestionAmbigue] = useState(null);
   const [reponseAmbigue, setReponseAmbigue] = useState("");
-  function creer(titreFinal) {
+  function creer(titreFinal, detections) {
     const start = allDay ? dDate : dDate + "T" + dTime;
     const end = allDay ? fDate : fDate + "T" + fTime;
-    onCreate({ id: ed ? ed.id : "ev" + Date.now(), titre: (titreFinal || titre).trim(), allDay, start, end, cat: cat[0], tone: cat[1], recurrence: rec, alerte, statut: ed ? ed.statut : "attente", proposePar: ed ? ed.proposePar : "moi" });
+    const original = titre.trim();
+    const retenu = (titreFinal || titre).trim();
+    // Titre adouci : on garde le texte de départ et les passages repérés dedans,
+    // pour que l'autre personne puisse voir ce qui lui était adressé.
+    onCreate({ id: ed ? ed.id : "ev" + Date.now(), titre: retenu, allDay, start, end, cat: cat[0], tone: cat[1], recurrence: rec, alerte, statut: ed ? ed.statut : "attente", proposePar: ed ? ed.proposePar : "moi", ...(retenu !== original ? { texteOriginal: original, detections: detections || [] } : {}) });
   }
   async function valider() {
     if (!titre.trim()) return;
@@ -2526,7 +2558,7 @@ function AjoutEvenement({ dateDefaut, evenement, type, aDesEnfants, onClose, onC
       <input value={titre} onChange={(e) => setTitre(e.target.value)} placeholder="Titre (ex : RDV pédiatre)" autoFocus style={{ width: "100%", boxSizing: "border-box", border: "none", outline: "none", background: C.card, borderRadius: 14, padding: "14px 16px", fontSize: 16, fontFamily: "inherit", color: C.ink, margin: "14px 0 12px", boxShadow: "0 2px 8px rgba(69,62,54,0.05)" }} />
 
       <BlocFiltrage resultat={filtrage}
-        onAccepterReformulation={(t) => { setFiltrage(null); setTitre(t); creer(t); }}
+        onAccepterReformulation={(t) => { const d = filtrage && filtrage.detections; setFiltrage(null); setTitre(t); creer(t, d); }}
         onReecrire={() => { setFiltrage(null); setTitre(""); }}
         onAnnuler={onClose} />
 
@@ -3514,7 +3546,12 @@ export default function TamiseApp() {
   /* --- Relations (intercalaires) : chacune a ses propres données --- */
   const [relations, setRelations] = useState(() => chargerLocal("relations", null) || []);
   const [relId, setRelId] = useState(() => chargerLocal("relId", null));
-  const REL_VIDE = { id: "vide", nom: "", type: "coparent", tel: "", emoji: "🌸", messages: [], depenses: [], solde: "Rien à régler pour l'instant", agenda: [], docs: [], enfants: [], notesPassage: [], photos: [], albums: [], listes: [], groupesTaches: [], notifPrefs: { actives: true, jours: ["L", "M", "M", "J", "V", "S", "D"], debut: "08:00", fin: "21:00" }, journal: [], journalSecret: [], alerte: false, questionnaire: null };
+  const REL_VIDE = { id: "vide", nom: "", type: "coparent", tel: "", emoji: "🌸", messages: [], depenses: [], solde: "Rien à régler pour l'instant", agenda: [], docs: [], enfants: [], notesPassage: [], photos: [], albums: [], listes: [], groupesTaches: [], notifPrefs: { actives: true, jours: ["L", "M", "M", "J", "V", "S", "D"], debut: "08:00", fin: "21:00" }, journal: [], journalSecret: [], alerte: false, questionnaire: null,
+    // Niveau de protection à la LECTURE, choisi par soi, pour cette relation :
+    // "forte" (seule la version apaisée), "intermediaire" (apaisée + original dépliable),
+    // "accompagnee" (original surligné). Ce choix ne quitte JAMAIS ce téléphone :
+    // le tri se fait ici, à la réception, pas chez la personne qui écrit.
+    modeLecture: "forte" };
   const rel = relations.find((r) => r.id === relId) || relations[0] || REL_VIDE;
 
   // Messages non encore vus : un message de "autre" est considéré vu dès que
@@ -3536,7 +3573,7 @@ export default function TamiseApp() {
   const tachesEnAttente = relations.reduce((n, r) => {
     const vues = r.tachesVues || [];
     const t1 = (r.groupesTaches || []).reduce((m, g) => m + (g.taches || []).filter((t) => t.confirmation === "attente" && t.proposePar === "autre" && !vues.includes(t.id)).length, 0);
-    const t2 = (r.listes || []).reduce((m, l) => m + (l.items || []).filter((it) => it.confirmation === "attente" && it.proposePar === "autre" && !vues.includes(it.id)).length, 0);
+    const t2 = (r.listes || []).reduce((m, l) => m + (l.items || []).filter((it) => it.proposePar === "autre" && !vues.includes(it.id)).length, 0);
     return n + t1 + t2;
   }, 0);
   const badges = { messages: messagesNonVus, agenda: agendaEnAttente, depenses: depensesEnAttente, plus: tachesEnAttente };
@@ -3544,21 +3581,28 @@ export default function TamiseApp() {
   // toutes relations confondues) : sert à la pastille de la tuile « Tâches » du menu Plus.
   const tachesEnAttenteRel =
     (rel.groupesTaches || []).some((g) => (g.taches || []).some((t) => t.confirmation === "attente" && t.proposePar === "autre" && !(rel.tachesVues || []).includes(t.id)))
-    || (rel.listes || []).some((l) => (l.items || []).some((it) => it.confirmation === "attente" && it.proposePar === "autre" && !(rel.tachesVues || []).includes(it.id)));
+    || (rel.listes || []).some((l) => (l.items || []).some((it) => it.proposePar === "autre" && !(rel.tachesVues || []).includes(it.id)));
 
   // Marque tâches et éléments de liste comme vus dès l'ouverture de l'écran
   // Tâches — sans ça, la pastille de « Plus » ne s'éteindrait jamais.
+  // On garde de côté ce qui était nouveau À L'ARRIVÉE : la mise en évidence
+  // reste visible tout le temps de la visite (sinon elle disparaîtrait avant
+  // même d'avoir été vue), et retrouve sa couleur normale la fois suivante.
+  const [nouveautesTaches, setNouveautesTaches] = useState([]);
   useEffect(() => {
-    if (!(tab === "plus" && plusVue === "taches") || rel.id === "vide") return;
+    if (!(tab === "plus" && plusVue === "taches") || rel.id === "vide") { setNouveautesTaches([]); return; }
     const vues = rel.tachesVues || [];
     const aVoir = [];
     (rel.groupesTaches || []).forEach((g) => (g.taches || []).forEach((t) => {
-      if (t.confirmation === "attente" && t.proposePar === "autre" && !vues.includes(t.id)) aVoir.push(t.id);
+      if (t.proposePar === "autre" && !vues.includes(t.id)) aVoir.push(t.id);
     }));
     (rel.listes || []).forEach((l) => (l.items || []).forEach((it) => {
-      if (it.confirmation === "attente" && it.proposePar === "autre" && !vues.includes(it.id)) aVoir.push(it.id);
+      if (it.proposePar === "autre" && !vues.includes(it.id)) aVoir.push(it.id);
     }));
-    if (aVoir.length) patchRel({ tachesVues: [...vues, ...aVoir] });
+    if (aVoir.length) {
+      setNouveautesTaches((n) => Array.from(new Set([...n, ...aVoir])));
+      patchRel({ tachesVues: [...vues, ...aVoir] });
+    }
   }, [tab, plusVue, relId, rel.groupesTaches, rel.listes]);
 
   // Marque les messages comme vus en QUITTANT l'onglet Messages (ou en changeant
@@ -3598,7 +3642,18 @@ export default function TamiseApp() {
   const listes = rel.listes || [];
   const groupesTaches = rel.groupesTaches || [];
   const notifPrefs = rel.notifPrefs || { actives: true, jours: ["L", "M", "M", "J", "V", "S", "D"], debut: "08:00", fin: "21:00" };
+  // Niveau de protection à la lecture. Le mien = ce que je veux recevoir.
+  // Par prudence, tout ce qui n'est pas explicitement réglé vaut "forte".
+  const modeLecture = rel.modeLecture || "forte";
   const patchRel = (patch) => setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, ...patch } : r)));
+
+  // Changer mon niveau : purement local. Le téléphone de l'autre personne n'en
+  // sait rien et n'a pas à le savoir — c'est ici, à la réception, que le tri se
+  // fait. Jamais rétroactif : ce qui a été reçu en protection forte a été trié
+  // à ce moment-là, il n'en reste rien à révéler.
+  function changerModeLecture(mode) {
+    patchRel({ modeLecture: mode });
+  }
   /* Collections vraiment partagées entre les deux téléphones.
      Volontairement exclus : "messages" (traité à part, avec son filtrage),
      "journal" et "journalSecret" qui restent strictement personnels. */
@@ -3650,9 +3705,20 @@ export default function TamiseApp() {
       setMediation(null);
       setDialogueGrave({ texte, detections: res.detections || [], besoinProbable: res.besoinProbable || null, question: res.clarification || null, echanges: [], etape: "hypothese" });
       setReponseClarification("");
-      // L'autre personne est prévenue qu'un message a été retenu — sans jamais en voir le contenu.
+      // Le destinataire est prévenu qu'un message a été retenu, et reçoit
+      // l'original UNIQUEMENT pour son journal sécurisé — jamais dans le fil de
+      // conversation. C'est elle qui a besoin de cette preuve si elle porte
+      // plainte un jour : la garder seulement chez l'expéditeur n'aurait aucun
+      // sens. Elle choisit de la consulter ou non, dans un espace dédié.
       if (rel.relationId) {
-        envoyerElementServeur(rel.relationId, "message", MON_APPAREIL, { retenu: true, heure, date, niveau: "grave" }).catch(() => {});
+        envoyerElementServeur(rel.relationId, "message", MON_APPAREIL, {
+          retenu: true, heure, date, niveau: "grave",
+          original: texte,
+          typeMeca: (res.detections[0] && res.detections[0].type) || "Menace",
+          // Passages repérés : si elle choisit de lire quand même, elle voit
+          // exactement ce qui lui était adressé, et ce que ça cherchait à produire.
+          detections: res.detections || [],
+        }).catch(() => {});
       }
       return;
     }
@@ -3665,14 +3731,68 @@ export default function TamiseApp() {
       niveau: res.niveau, detections: res.detections || [],
       contradiction: res.contradiction || null,
     });
-    // Seule la version transmise part vers l'autre téléphone : l'original reste ici.
+    // L'original et les mécanismes repérés partent toujours. Ce n'est PAS le
+    // téléphone de la personne qui écrit qui décide de ce que l'autre peut
+    // lire : il n'a donc jamais à connaître son niveau de protection. Le tri se
+    // fait à l'arrivée, et ce qui est trié n'est jamais conservé.
     if (rel.relationId) {
-      envoyerElementServeur(rel.relationId, "message", MON_APPAREIL, {
-        texte: texteTransmis, filtre: aEteFiltre, niveau: res.niveau, heure, date,
-      }).catch(() => {});
+      const contenu = { texte: texteTransmis, filtre: aEteFiltre, niveau: res.niveau, heure, date };
+      if (aEteFiltre) {
+        contenu.original = texte;
+        contenu.detections = res.detections || [];
+      }
+      envoyerElementServeur(rel.relationId, "message", MON_APPAREIL, contenu).catch(() => {});
     }
     setMediation("envoye");
     setTimeout(() => setMediation(null), 1300);
+  }
+
+  /* Affichage du texte d'un élément partagé (agenda, dépense, tâche) selon le
+     niveau de protection choisi ici. Ces textes sont courts : on reste léger,
+     une seule ligne, jamais de pavé.
+     - protection forte : uniquement la version apaisée
+     - intermédiaire : version apaisée + petit lien pour ouvrir l'original
+     - lecture accompagnée : directement l'original */
+  /* Surligne, dans un texte court, les passages repérés — même principe que
+     pour les messages : la personne voit ce qui lui était adressé, et ce que
+     chaque passage cherchait à produire chez elle. */
+  function SurlignageCourt({ texte, detections }) {
+    if (!detections || detections.length === 0) return <>{texte}</>;
+    let reste = texte;
+    const parts = [];
+    detections.forEach((d, i) => {
+      const idx = d.passage ? reste.toLowerCase().indexOf(d.passage.toLowerCase()) : -1;
+      if (idx >= 0) {
+        parts.push(reste.slice(0, idx));
+        parts.push(
+          <mark key={i} onClick={(e) => { e.stopPropagation(); setInfoOuverte(d); }} style={{ background: C.highlight, color: C.ink, borderRadius: 6, padding: "1px 4px", cursor: "pointer", boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" }}>
+            {reste.substr(idx, d.passage.length)}<Info size={11} style={{ marginLeft: 3, verticalAlign: "-1px" }} />
+          </mark>
+        );
+        reste = reste.slice(idx + d.passage.length);
+      }
+    });
+    parts.push(reste);
+    return <>{parts}</>;
+  }
+
+  function TexteCommun({ item, texte, style }) {
+    const aOrig = item && item.proposePar === "autre" && item.texteOriginal && modeLecture !== "forte";
+    const montreOrig = aOrig && (modeLecture === "accompagnee" || preuvesOuvertes["c" + item.id]);
+    if (!aOrig) return <span style={style}>{texte}</span>;
+    return (
+      <span style={style}>
+        {montreOrig
+          ? <SurlignageCourt texte={item.texteOriginal} detections={item.detections} />
+          : texte}
+        {modeLecture === "intermediaire" && (
+          <button onClick={(e) => { e.stopPropagation(); setPreuvesOuvertes({ ...preuvesOuvertes, ["c" + item.id]: !preuvesOuvertes["c" + item.id] }); }}
+            style={{ marginLeft: 6, border: "none", background: "none", cursor: "pointer", color: C.taupe, fontSize: 10.5, fontWeight: 700, fontFamily: "inherit", padding: 0, whiteSpace: "nowrap" }}>
+            {montreOrig ? "version apaisée" : "texte d'origine"}
+          </button>
+        )}
+      </span>
+    );
   }
 
   /* Relit la réponse de la personne et décide : soit Iris a assez compris pour
@@ -3831,6 +3951,7 @@ export default function TamiseApp() {
   const [nouvelleListeOuverte, setNouvelleListeOuverte] = useState(false);
   const [saisieItem, setSaisieItem] = useState({}); // { [listeId]: texte en cours de saisie }
   const [filtrageListe, setFiltrageListe] = useState(null); // { listeId, texte, res } si un ajout est refusé
+  const [preuvesOuvertes, setPreuvesOuvertes] = useState({}); // { [idPreuve]: true } — messages reçus dépliés
   const [nouveauGroupeOuvert, setNouveauGroupeOuvert] = useState(false);
   const [nouvelleTacheGroupe, setNouvelleTacheGroupe] = useState(null); // groupeId ou null
   const [tacheOuverte, setTacheOuverte] = useState(null); // { groupeId, tache }
@@ -3865,15 +3986,27 @@ export default function TamiseApp() {
         const decoder = (e) => (typeof e.contenu === "string" ? JSON.parse(e.contenu) : e.contenu);
         const desAutres = elements.filter((e) => e.auteur !== MON_APPAREIL);
 
-        // Messages : on ne reçoit que la version transmise, jamais l'original.
+        // Messages : le fil n'affiche jamais l'original d'un message retenu —
+        // seulement la carte signalant qu'il a été bloqué. Pour les messages
+        // adoucis, l'original n'arrive que si le niveau de protection choisi
+        // ici l'autorise (sinon il n'a jamais quitté l'autre téléphone).
         const nouveaux = desAutres
           .filter((e) => e.type === "message")
           .map((e) => {
             const c = decoder(e);
             return c.retenu
-              ? { id: "srv" + e.id, de: "autre", retenu: true, niveau: "grave", heure: c.heure, date: c.date }
-              : { id: "srv" + e.id, de: "autre", texte: c.texte, texteOriginal: c.texte, filtre: !!c.filtre, niveau: c.niveau, heure: c.heure, date: c.date };
+              ? { id: "srv" + e.id, de: "autre", retenu: true, niveau: "grave", heure: c.heure, date: c.date, original: c.original || null, typeMeca: c.typeMeca || null, detections: c.detections || [] }
+              : { id: "srv" + e.id, de: "autre", texte: c.texte, texteOriginal: c.original || c.texte, aOriginal: !!c.original, detections: c.detections || [], filtre: !!c.filtre, niveau: c.niveau, heure: c.heure, date: c.date };
           });
+
+        // Les originaux des messages retenus vont dans le journal sécurisé du
+        // destinataire (horodatés, non modifiables) : c'est SA preuve, à
+        // consulter seulement si elle le souhaite, dans un espace dédié.
+        const preuvesRecues = desAutres
+          .filter((e) => e.type === "message")
+          .map((e) => ({ e, c: decoder(e) }))
+          .filter(({ c }) => c.retenu && c.original)
+          .map(({ e, c }) => ({ id: "srv" + e.id, texte: c.original, date: (c.date || "") + " " + (c.heure || ""), type: c.typeMeca || "Menace", recu: true }));
 
         // Agenda, dépenses, tâches, photos… : repris tels quels.
         const parChamp = {};
@@ -3886,14 +4019,44 @@ export default function TamiseApp() {
         // voit l'ajout de l'autre mais ne peut jamais y réagir.
         const modifs = desAutres.filter((e) => e.type === "maj").map(decoder);
 
+
         setRelations((rs) => rs.map((r) => {
           if (r.id !== relId) return r;
           const maj = { ...r, dernierId };
 
+          /* ---- Le tri se fait ICI, à l'arrivée ----
+             En protection forte, le texte d'origine et les mécanismes repérés
+             sont écartés au moment même où ils arrivent : ils ne sont jamais
+             enregistrés sur ce téléphone. C'est ce qui garantit qu'un
+             changement de niveau ne peut rien révéler du passé — il n'en reste
+             rien. Le niveau est lu sur la relation elle-même, pour être sûr de
+             travailler avec la valeur à jour.
+             Exception volontaire : un message BLOQUÉ garde son original, qui
+             part au journal sécurisé. C'est sa preuve, quel que soit le niveau. */
+          const protegeIci = (r.modeLecture || "forte") === "forte";
+          const trier = (o) => {
+            if (!protegeIci || !o || typeof o !== "object") return o;
+            const { texteOriginal, detections, ...reste } = o;
+            return reste;
+          };
+
           const dejaLa = new Set((r.messages || []).map((m) => m.id));
-          const aAjouter = nouveaux.filter((m) => !dejaLa.has(m.id));
+          const aAjouter = nouveaux
+            .filter((m) => !dejaLa.has(m.id))
+            .map((m) => {
+              if (m.retenu || !protegeIci) return m;
+              const { texteOriginal, detections, aOriginal, ...reste } = m;
+              return { ...reste, texteOriginal: m.texte, detections: [], aOriginal: false };
+            });
           if (aAjouter.length) maj.messages = [...(r.messages || []), ...aAjouter];
           if (aAjouter.some((m) => m.retenu)) maj.alerte = true;
+
+          // Journal sécurisé : on n'ajoute que ce qui n'y est pas déjà.
+          if (preuvesRecues.length) {
+            const dejaArchive = new Set((r.journalSecret || []).map((x) => x && x.id).filter(Boolean));
+            const nouvellesPreuves = preuvesRecues.filter((p) => !dejaArchive.has(p.id));
+            if (nouvellesPreuves.length) maj.journalSecret = [...(r.journalSecret || []), ...nouvellesPreuves];
+          }
 
           // On ignore ce qui est déjà présent, au cas où un élément reviendrait deux fois.
           Object.keys(parChamp).forEach((champ) => {
@@ -3905,12 +4068,12 @@ export default function TamiseApp() {
             const nouveauxDuChamp = parChamp[champ]
               .filter((x) => !x.id || !existants.has(x.id))
               .map((x) => {
-                if (!x || x.proposePar !== "moi") return x;
-                const conv = { ...x, proposePar: "autre" };
+                if (!x || x.proposePar !== "moi") return trier(x);
+                const conv = { ...trier(x), proposePar: "autre" };
                 // Un groupe de tâches peut contenir des tâches, qui portent
                 // elles aussi leur propre proposePar : à convertir également.
                 if (champ === "groupesTaches" && Array.isArray(x.taches)) {
-                  conv.taches = x.taches.map((t) => (t && t.proposePar === "moi" ? { ...t, proposePar: "autre" } : t));
+                  conv.taches = x.taches.map((t) => (t && t.proposePar === "moi" ? { ...trier(t), proposePar: "autre" } : trier(t)));
                 }
                 return conv;
               });
@@ -3925,7 +4088,7 @@ export default function TamiseApp() {
               const listes = maj.listes || r.listes || [];
               const dejaLa = listes.some((l) => l.id === m.id && (l.items || []).some((it) => it.id === m.ajoutItem.id));
               if (!dejaLa) {
-                maj.listes = listes.map((l) => (l.id === m.id ? { ...l, items: [...(l.items || []), { ...m.ajoutItem, proposePar: "autre" }] } : l));
+                maj.listes = listes.map((l) => (l.id === m.id ? { ...l, items: [...(l.items || []), { ...trier(m.ajoutItem), proposePar: "autre" }] } : l));
               }
               return;
             }
@@ -3955,7 +4118,7 @@ export default function TamiseApp() {
               const groupes = maj.groupesTaches || r.groupesTaches || [];
               const dejaLa = groupes.some((g) => g.id === m.id && (g.taches || []).some((t) => t.id === m.ajoutTache.id));
               if (!dejaLa) {
-                maj.groupesTaches = groupes.map((g) => (g.id === m.id ? { ...g, taches: [...(g.taches || []), { ...m.ajoutTache, proposePar: "autre" }] } : g));
+                maj.groupesTaches = groupes.map((g) => (g.id === m.id ? { ...g, taches: [...(g.taches || []), { ...trier(m.ajoutTache), proposePar: "autre" }] } : g));
               }
               return;
             }
@@ -4086,7 +4249,7 @@ export default function TamiseApp() {
       setFiltrageListe({ listeId, texte, res });
       return;
     }
-    const item = { id: "i" + Date.now(), texte: texteFinal, fait: false, proposePar: "moi", confirmation: "attente" };
+    const item = { id: "i" + Date.now(), texte: texteFinal, fait: false, proposePar: "moi", confirmation: "attente", ...(texteFinal !== texte ? { texteOriginal: texte, detections: res.detections || [] } : {}) };
     setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, listes: r.listes.map((l) => (l.id === listeId ? { ...l, items: [...l.items, item] } : l)) } : r)));
     // Ajouter un élément à une liste existante est une MODIFICATION de la liste :
     // sans cet envoi, l'autre téléphone ne voit jamais le nouvel élément.
@@ -4307,7 +4470,7 @@ export default function TamiseApp() {
                   || (r.agenda || []).some((e) => e.statut === "attente" && e.proposePar === "autre" && !(r.evenementsVus || []).includes(e.id))
                   || (r.depenses || []).some((d) => d.validation === "attente" && d.proposePar === "autre" && !(r.depensesVues || []).includes(d.id))
                   || (r.groupesTaches || []).some((g) => (g.taches || []).some((t) => t.confirmation === "attente" && t.proposePar === "autre" && !(r.tachesVues || []).includes(t.id)))
-                  || (r.listes || []).some((l) => (l.items || []).some((it) => it.confirmation === "attente" && it.proposePar === "autre" && !(r.tachesVues || []).includes(it.id)));
+                  || (r.listes || []).some((l) => (l.items || []).some((it) => it.proposePar === "autre" && !(r.tachesVues || []).includes(it.id)));
                 return (
                   <button key={r.id} onClick={() => { if (actif) { setGererRelOuvert(true); } else { setRelId(r.id); setVueDestinataire(false); setPlusVue("menu"); } }}
                     style={{
@@ -4418,6 +4581,22 @@ export default function TamiseApp() {
                         <Shield size={18} color={C.brick} style={{ flexShrink: 0, marginTop: 2 }} />
                         <div style={{ fontSize: 12.5, color: C.ink, lineHeight: 1.55 }}>
                           <b style={{ color: C.brick }}>Un message de {partenaire} a été retenu.</b> Il contenait une menace et ne t'a pas été transmis. Il est conservé, horodaté, dans ton journal sécurisé. {accordGenre("Tu n'es pas seul·e.", genre)}
+                          {/* Dans les niveaux les plus légers, la personne peut choisir
+                              de lire quand même : le message reste bloqué, mais elle
+                              garde la main sur ce qu'elle décide de regarder. */}
+                          {modeLecture !== "forte" && m.original && (
+                            preuvesOuvertes[m.id] ? (
+                              <div style={{ background: C.card, borderRadius: 12, padding: "10px 12px", marginTop: 10, fontSize: 13, lineHeight: 1.5, color: C.ink }}>
+                                « <SurlignageCourt texte={m.original} detections={m.detections} /> »
+                                {m.typeMeca && <div style={{ fontSize: 11, fontWeight: 700, color: C.brick, marginTop: 6 }}>{m.typeMeca}</div>}
+                              </div>
+                            ) : (
+                              <button onClick={() => setPreuvesOuvertes({ ...preuvesOuvertes, [m.id]: true })}
+                                style={{ marginTop: 10, border: `1.5px solid ${C.brick}`, cursor: "pointer", background: C.card, color: C.brick, borderRadius: 12, padding: "8px 13px", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>
+                                Lire quand même
+                              </button>
+                            )
+                          )}
                           <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                             {[["17", "Police"], ["3919", "Violences Info"], ["112", "Urgences"]].map(([n, l]) => (
                               <span key={n} style={{ background: C.card, borderRadius: 12, padding: "7px 11px", fontSize: 12, fontWeight: 700, color: C.brick, display: "flex", gap: 5, alignItems: "center" }}>
@@ -4432,6 +4611,14 @@ export default function TamiseApp() {
                 }
                 const estMoi = m.de === "moi";
                 const nonLu = !estMoi && idsMessagesNonLus.has(m.id);
+                // Message REÇU qui a été adouci, et dont l'original a voyagé
+                // parce que le niveau de protection l'autorisait.
+                const recuAvecOriginal = !estMoi && !vueDestinataire && m.aOriginal && m.filtre;
+                // Lecture accompagnée : on affiche directement l'original surligné.
+                const recuAccompagne = recuAvecOriginal && modeLecture === "accompagnee";
+                // Intermédiaire : version apaisée, avec la possibilité de déplier l'original.
+                const recuDepliable = recuAvecOriginal && modeLecture === "intermediaire";
+                const originalDeplie = preuvesOuvertes[m.id];
                 // Chacun voit toujours ce qu'il a écrit ; l'autre voit la version transmise.
                 const texteAffiche = estMoi
                   ? (vueDestinataire ? m.texteEnvoye : m.texteOriginal)
@@ -4447,7 +4634,11 @@ export default function TamiseApp() {
                   <div key={m.id} className="voile" style={{ display: "flex", justifyContent: estMoi ? "flex-end" : "flex-start", marginBottom: 12 }}>
                     <div style={{ maxWidth: "82%" }}>
                       <div style={{ position: "relative", background: estMoi ? (vueDestinataire ? C.card : C.beigeSoft) : (nonLu ? "#F6ECD9" : C.card), color: C.ink, borderRadius: estMoi ? "20px 20px 6px 20px" : "20px 20px 20px 6px", padding: aDetections && !vueDestinataire ? "12px 34px 12px 15px" : "12px 15px", fontSize: 14.5, lineHeight: 1.5, boxShadow: "0 4px 14px rgba(69,62,54,0.05)", borderLeft: !estMoi && lisere ? `3px solid ${lisere}` : undefined, borderRight: estMoi && lisere ? `3px solid ${lisere}` : undefined }}>
-                        {estMoi && !vueDestinataire && poussoir ? <TexteSurligne m={m} /> : texteAffiche}
+                        {estMoi && !vueDestinataire && poussoir
+                          ? <TexteSurligne m={m} />
+                          : recuAccompagne
+                            ? <TexteSurligne m={m} />
+                            : texteAffiche}
                         {/* Bouton poussoir en haut à droite du message envoyé */}
                         {aDetections && !vueDestinataire && (
                           <button onClick={() => setPoussoirOuvert(poussoir ? null : m.id)} aria-label="Voir les zones adoucies"
@@ -4459,6 +4650,32 @@ export default function TamiseApp() {
                       {poussoir && !vueDestinataire && (
                         <div className="voile" style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 5, textAlign: "right", lineHeight: 1.4 }}>
                           Ce message contenait : {m.detections.map((d) => d.type.toLowerCase()).join(", ")}.<br />Touche un passage surligné pour comprendre. 🌱
+                        </div>
+                      )}
+                      {/* Niveau intermédiaire : la version apaisée reste la première
+                          chose lue ; l'original ne s'ouvre que si elle le demande. */}
+                      {recuDepliable && (
+                        originalDeplie ? (
+                          <div className="voile" style={{ marginTop: 6, background: C.card, borderRadius: 14, padding: "11px 13px", borderLeft: `3px solid #D9A441` }}>
+                            <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8a6320", marginBottom: 5 }}>MESSAGE D'ORIGINE</div>
+                            <div style={{ fontSize: 13.5, lineHeight: 1.5, color: C.ink }}><TexteSurligne m={m} /></div>
+                            <button onClick={() => setPreuvesOuvertes({ ...preuvesOuvertes, [m.id]: false })}
+                              style={{ marginTop: 8, border: "none", background: "none", cursor: "pointer", color: C.taupe, fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", padding: 0 }}>
+                              Replier
+                            </button>
+                          </div>
+                        ) : (
+                          <button onClick={() => setPreuvesOuvertes({ ...preuvesOuvertes, [m.id]: true })} className="voile"
+                            style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 5, border: "none", cursor: "pointer", background: "none", color: C.taupe, fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", padding: 0 }}>
+                            <ChevronDown size={13} /> Voir le message d'origine
+                          </button>
+                        )
+                      )}
+                      {/* Lecture accompagnée : l'original est déjà affiché, on nomme
+                          simplement ce qui a été repéré dedans. */}
+                      {recuAccompagne && m.detections.length > 0 && (
+                        <div className="voile" style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 5, lineHeight: 1.4 }}>
+                          Repéré ici : {m.detections.map((d) => d.type.toLowerCase()).join(", ")}. Touche un passage surligné pour comprendre.
                         </div>
                       )}
                       {m.contradiction && (
@@ -4548,7 +4765,7 @@ export default function TamiseApp() {
                   <Card key={d.id} style={{ marginBottom: 10, ...(aConfirmer ? { background: "#F6ECD9", boxShadow: "none" } : {}) }}>
                     <button onClick={() => { setDepenseEdit(d); setAjoutDepense(true); if (!(rel.depensesVues || []).includes(d.id)) patchRel({ depensesVues: [...(rel.depensesVues || []), d.id] }); }} style={{ width: "100%", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left", padding: 0, display: "flex", alignItems: "center", gap: 12 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 14.5, fontWeight: 700, color: C.ink }}>{d.nom}</div>
+                        <div style={{ fontSize: 14.5, fontWeight: 700, color: C.ink }}><TexteCommun item={d} texte={d.nom} /></div>
                         <div style={{ marginTop: 5, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                           <Tag tone={d.cat === "Santé" ? "sage" : "beige"}>{d.cat}</Tag>
                           <span style={{ fontSize: 11.5, color: C.inkSoft }}>payé par {d.payePar === "moi" ? "toi" : partenaire}</span>
@@ -4845,14 +5062,26 @@ export default function TamiseApp() {
                         {liste.items.map((it) => {
                           // Nouvel élément ajouté par l'autre personne, pas encore vu : même
                           // mise en évidence que les tâches avancées et les dépenses en attente.
-                          const nouveau = it.confirmation === "attente" && it.proposePar === "autre";
+                          const nouveau = it.proposePar === "autre" && nouveautesTaches.includes(it.id);
+                          // Élément adouci reçu de l'autre, dont l'original a voyagé.
+                          // Texte court : une simple ligne dépliée sous l'élément suffit.
+                          const aOrig = it.proposePar === "autre" && it.texteOriginal && modeLecture !== "forte";
+                          const origVu = aOrig && (modeLecture === "accompagnee" || preuvesOuvertes[it.id]);
                           return (
-                          <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 8px", margin: nouveau ? "2px 0" : 0, borderRadius: nouveau ? 12 : 0, background: nouveau ? "#F6ECD9" : "none" }}>
-                            <button onClick={() => toggleItemListe(liste.id, it.id)} aria-label="Cocher" style={{ border: "none", background: "none", cursor: "pointer", padding: 0, display: "flex", flexShrink: 0 }}>
-                              {it.fait ? <CheckCircle2 size={19} color={COULEURS_LISTE[liste.couleur]} /> : <Circle size={19} color={C.grey} />}
-                            </button>
-                            <span style={{ flex: 1, fontSize: 13.5, color: it.fait ? C.inkSoft : C.ink, textDecoration: it.fait ? "line-through" : "none" }}>{it.texte}</span>
-                            <button onClick={() => supprimerItemListe(liste.id, it.id)} aria-label="Retirer" style={{ border: "none", background: "none", cursor: "pointer", color: C.inkSoft, padding: 0, flexShrink: 0 }}><X size={14} /></button>
+                          <div key={it.id} style={{ padding: "7px 8px", margin: nouveau ? "2px 0" : 0, borderRadius: nouveau ? 12 : 0, background: nouveau ? "#F6ECD9" : "none" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <button onClick={() => toggleItemListe(liste.id, it.id)} aria-label="Cocher" style={{ border: "none", background: "none", cursor: "pointer", padding: 0, display: "flex", flexShrink: 0 }}>
+                                {it.fait ? <CheckCircle2 size={19} color={COULEURS_LISTE[liste.couleur]} /> : <Circle size={19} color={C.grey} />}
+                              </button>
+                              <span style={{ flex: 1, fontSize: 13.5, color: it.fait ? C.inkSoft : C.ink, textDecoration: it.fait ? "line-through" : "none" }}>{origVu ? <SurlignageCourt texte={it.texteOriginal} detections={it.detections} /> : it.texte}</span>
+                              <button onClick={() => supprimerItemListe(liste.id, it.id)} aria-label="Retirer" style={{ border: "none", background: "none", cursor: "pointer", color: C.inkSoft, padding: 0, flexShrink: 0 }}><X size={14} /></button>
+                            </div>
+                            {aOrig && modeLecture === "intermediaire" && (
+                              <button onClick={() => setPreuvesOuvertes({ ...preuvesOuvertes, [it.id]: !preuvesOuvertes[it.id] })}
+                                style={{ marginLeft: 29, marginTop: 2, border: "none", background: "none", cursor: "pointer", color: C.taupe, fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0 }}>
+                                {preuvesOuvertes[it.id] ? "Revenir à la version apaisée" : "Voir le texte d'origine"}
+                              </button>
+                            )}
                           </div>
                           );
                         })}
@@ -4908,8 +5137,8 @@ export default function TamiseApp() {
                   {g.ouverte && (
                     <>
                       {g.taches.map((t) => (
-                        <Card key={t.id} onClick={() => setTacheOuverte({ groupeId: g.id, tache: t })} style={{ marginBottom: 8, cursor: "pointer", padding: 13, ...(t.confirmation === "attente" && t.proposePar === "autre" ? { background: "#F6ECD9" } : {}) }}>
-                          <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, marginBottom: 8 }}>{t.nom}</div>
+                        <Card key={t.id} onClick={() => setTacheOuverte({ groupeId: g.id, tache: t })} style={{ marginBottom: 8, cursor: "pointer", padding: 13, ...(t.proposePar === "autre" && nouveautesTaches.includes(t.id) ? { background: "#F6ECD9" } : {}) }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, marginBottom: 8 }}><TexteCommun item={t} texte={t.nom} /></div>
                           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                             <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 999, padding: "4px 9px", background: STATUT_TACHE[t.statut].bg, color: STATUT_TACHE[t.statut].fg }}>{STATUT_TACHE[t.statut].label}</span>
                             <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 999, padding: "4px 9px", background: PRIORITE_TACHE[t.priorite].bg, color: "#fff" }}>{PRIORITE_TACHE[t.priorite].label}</span>
@@ -4991,6 +5220,27 @@ export default function TamiseApp() {
 
           {tab === "plus" && plusVue === "reglages" && (
             <div className="voile">
+              {/* Niveau de protection : chacun règle ce qu'IL reçoit, pour cette
+                  relation. L'autre personne n'en est jamais informée. */}
+              <Card style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: C.ink, marginBottom: 3 }}>Comment tu veux lire les messages de {partenaire}</div>
+                <div style={{ fontSize: 12, color: C.inkSoft, lineHeight: 1.45, marginBottom: 10 }}>
+                  Ce choix n'appartient qu'à toi : {partenaire} n'en est pas informé{accordGenre("·e", genre)}. Il ne vaut que pour la suite, jamais pour les messages déjà reçus. Dans tous les cas, une menace reste bloquée.
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {[
+                    ["forte", "Protection forte", "Tu ne lis que la version apaisée."],
+                    ["intermediaire", "Intermédiaire", "Version apaisée, avec la possibilité d'ouvrir le message d'origine."],
+                    ["accompagnee", "Lecture accompagnée", "Le message d'origine, avec les passages problématiques surlignés et nommés."],
+                  ].map(([val, titre, desc]) => (
+                    <button key={val} onClick={() => changerModeLecture(val)}
+                      style={{ textAlign: "left", border: modeLecture === val ? `1.5px solid ${C.taupe}` : `1.5px solid ${C.grey}`, cursor: "pointer", borderRadius: 14, padding: "11px 13px", fontFamily: "inherit", background: modeLecture === val ? C.beigeSoft : C.card }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 700, color: modeLecture === val ? C.taupe : C.ink }}>{titre}</div>
+                      <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 3, lineHeight: 1.4 }}>{desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </Card>
               <Card style={{ marginBottom: 10 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: C.ink, marginBottom: 3 }}>Comment Tamisé s'adresse à toi</div>
                 <div style={{ fontSize: 12, color: C.inkSoft, lineHeight: 1.45, marginBottom: 10 }}>Accord des phrases (« prêt·e », « seul·e »…). Tamisé te tutoie toujours.</div>
@@ -5091,9 +5341,30 @@ export default function TamiseApp() {
               {journalSecret.length === 0 ? (
                 <div style={{ textAlign: "center", fontSize: 13, color: C.inkSoft, padding: 24, lineHeight: 1.5 }}>Aucune entrée pour l'instant.<br />(Essaie le scénario « Cas 3 » dans la messagerie.)</div>
               ) : journalSecret.map((e, i) => (
-                <Card key={i} style={{ marginBottom: 10, border: `1.5px solid ${C.brickBg}` }}>
-                  <Tag tone="brick">{e.type}</Tag>
-                  <div style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5, marginTop: 8 }}>« {e.texte} »</div>
+                <Card key={e.id || i} style={{ marginBottom: 10, border: `1.5px solid ${C.brickBg}` }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                    <Tag tone="brick">{e.type}</Tag>
+                    {e.recu && <Tag tone="grey">Reçu de {partenaire}</Tag>}
+                  </div>
+                  {e.recu ? (
+                    // Un message reçu contient une menace adressée à la personne :
+                    // il est conservé comme preuve, mais jamais imposé à la lecture.
+                    preuvesOuvertes[e.id] ? (
+                      <div style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5, marginTop: 8 }}>« {e.texte} »</div>
+                    ) : (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ fontSize: 12.5, color: C.inkSoft, lineHeight: 1.5 }}>
+                          Le message original est conservé ici comme preuve. Il contient une menace — tu n'es pas obligée de le lire.
+                        </div>
+                        <button onClick={() => setPreuvesOuvertes({ ...preuvesOuvertes, [e.id]: true })}
+                          style={{ marginTop: 8, border: `1.5px solid ${C.grey}`, cursor: "pointer", background: C.card, color: C.brick, borderRadius: 12, padding: "8px 13px", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>
+                          Afficher quand même
+                        </button>
+                      </div>
+                    )
+                  ) : (
+                    <div style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5, marginTop: 8 }}>« {e.texte} »</div>
+                  )}
                   <div style={{ fontSize: 10.5, color: C.inkSoft, marginTop: 8, display: "flex", gap: 6, alignItems: "center" }}><Lock size={10} /> {e.date} · empreinte scellée</div>
                 </Card>
               ))}
@@ -5315,7 +5586,7 @@ export default function TamiseApp() {
               <Card key={d.id} style={{ marginTop: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>{d.nom}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.ink }}><TexteCommun item={d} texte={d.nom} /></div>
                     <div style={{ marginTop: 4 }}><Tag tone={d.cat === "Santé" ? "sage" : "beige"}>{d.cat}</Tag></div>
                   </div>
                   <div style={{ fontFamily: "'Fraunces', serif", fontSize: 16, color: C.ink }}>{eur(d.montant)}</div>
@@ -5510,7 +5781,7 @@ export default function TamiseApp() {
                 <Tag tone={e.tone}>{e.cat}</Tag>
                 <button onClick={() => setEventOuvert(null)} aria-label="Fermer" style={{ border: "none", background: "rgba(255,255,255,0.88)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)", boxShadow: "0 2px 8px rgba(69,62,54,0.16)", borderRadius: 999, width: 30, height: 30, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={15} color={C.ink} /></button>
               </div>
-              <div style={{ fontFamily: "'Fraunces', serif", fontSize: 20, color: C.ink, marginTop: 12 }}>{e.titre}</div>
+              <div style={{ fontFamily: "'Fraunces', serif", fontSize: 20, color: C.ink, marginTop: 12 }}><TexteCommun item={e} texte={e.titre} /></div>
               <div style={{ fontSize: 14, color: C.ink, marginTop: 8, lineHeight: 1.7 }}>
                 📅 {JOURS_LONG[lundiIndex(new Date(s.y, s.m, s.d).getDay())]} {s.d} {MOIS_FR[s.m]} {s.y}<br />
                 {e.allDay ? "🕘 Jour entier" : "🕘 " + heureDeISO(e.start) + (heureDeISO(e.end) ? " → " + heureDeISO(e.end) : "")}<br />
