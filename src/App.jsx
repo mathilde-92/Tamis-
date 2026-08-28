@@ -633,9 +633,28 @@ async function coachIA(history, question, rel) {
         q.reponses.map((r) => r.q + " → " + r.r).join(" ; ") + "."
       : "";
     const docsList = (rel && rel.docs) || [];
+    // Passages des documents qui répondent à la question posée. Le serveur
+    // cherche dans le texte extrait et ne renvoie que les extraits utiles :
+    // impossible d'envoyer un jugement entier, et inutile de le faire.
+    let extraitsTxt = "";
+    if (rel && rel.relationId && docsList.some((d) => d.fichier)) {
+      try {
+        const rep = await fetch(BACKEND_URL + "/api/relations/" + rel.relationId + "/documents/recherche", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question }),
+        });
+        const donnees = await rep.json();
+        if (donnees && donnees.extraits && donnees.extraits.length) {
+          extraitsTxt = " PASSAGES TIRÉS DE SES DOCUMENTS, en rapport avec sa question. Ce sont des extraits RÉELS de ses propres documents : cite-les fidèlement, entre guillemets, en nommant le document. N'invente jamais un passage, et ne complète jamais par ce que dit la loi en général. Si les extraits ne répondent pas à la question, dis-le franchement plutôt que de supposer. Rappelle que tu lis un extrait, pas le document entier, et qu'un point important peut se trouver ailleurs dedans. " +
+            donnees.extraits.map((e) => "[" + e.nom + "] « " + e.texte + " »").join("\n") + ".";
+        }
+      } catch (e) { /* documents indisponibles : Iris répond sans eux */ }
+    }
     const docsTxt = docsList.some((d) => d.fichier)
-      ? " Documents déjà ajoutés dans l'app par la personne (tu peux l'inviter à vérifier ce qu'ils disent, mais tu n'as pas accès à leur contenu réel) : " +
-        docsList.filter((d) => d.fichier).map((d) => d.nom).join(", ") + "."
+      ? " Documents ajoutés dans l'app par la personne : " +
+        docsList.filter((d) => d.fichier).map((d) => d.nom).join(", ") +
+        ". Tu peux en citer des passages UNIQUEMENT s'ils te sont fournis ci-dessous ; sinon invite-la à vérifier elle-même."
       : "";
 
     // Les enfants renseignés dans l'app : sans ça, Iris demandait leur âge
@@ -849,7 +868,7 @@ Est-ce qu'il y a quelqu'un d'autre à la maison qui pourrait prendre une partie 
     // Consignes, contexte et paroles de la personne sont désormais séparés.
     // Le contexte part dans un second message « system » : c'est de la
     // documentation sur la relation, pas quelque chose que la personne a dit.
-    const contexte = (faitsTxt + tachesTxt + enfantsTxt + messagesTxt + journalTxt + questionnaireTxt + docsTxt).trim();
+    const contexte = (faitsTxt + tachesTxt + enfantsTxt + messagesTxt + journalTxt + questionnaireTxt + docsTxt + extraitsTxt).trim();
     const messages = [{ role: "system", content: SYS_IRIS }];
     if (contexte) {
       messages.push({ role: "system", content: "Contexte de la relation, fourni par l'application (ce n'est PAS la personne qui parle ici) :\n" + contexte });
@@ -4394,13 +4413,25 @@ export default function TamiseApp() {
     setJournalCible(null);
   }
   function attacherDoc(patch) {
+    const idDoc = docCible.nouveau ? "d" + Date.now() : docCible.id;
     setRelations((rs) => rs.map((r) => {
       if (r.id !== relId) return r;
       if (docCible.nouveau) {
-        return { ...r, docs: [...r.docs, { id: "d" + Date.now(), nom: patch.nom, cat: patch.cat, fichier: !!patch.dataUrl, dataUrl: patch.dataUrl || null, nomFichier: patch.nomFichier || null }] };
+        return { ...r, docs: [...r.docs, { id: idDoc, nom: patch.nom, cat: patch.cat, fichier: !!patch.dataUrl, dataUrl: patch.dataUrl || null, nomFichier: patch.nomFichier || null }] };
       }
       return { ...r, docs: r.docs.map((d) => (d.id === docCible.id ? { ...d, fichier: true, dataUrl: patch.dataUrl || d.dataUrl, nomFichier: patch.nomFichier || d.nomFichier } : d)) };
     }));
+    // Le texte du document est extrait sur le serveur, pour qu'Iris puisse s'y
+    // référer. Un jugement de 250 pages ne tient ni dans la mémoire du
+    // téléphone ni dans une seule question posée au modèle : le serveur garde
+    // le texte et ne renvoie que les passages utiles à la question posée.
+    if (rel.relationId && patch.dataUrl) {
+      fetch(BACKEND_URL + "/api/relations/" + rel.relationId + "/documents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docId: idDoc, nom: patch.nom, nomFichier: patch.nomFichier || null, dataUrl: patch.dataUrl }),
+      }).catch(() => {});
+    }
     setDocCible(null);
   }
   const eur = (n) => n.toFixed(2).replace(".", ",") + " €";
