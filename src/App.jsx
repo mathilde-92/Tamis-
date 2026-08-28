@@ -806,6 +806,13 @@ N'entoure JAMAIS ta réponse de guillemets. Tu parles directement, tu ne cites p
 3. Quand le message ne permet pas de trancher, ne tranche pas. Donne les deux lectures, la plus innocente d'abord et prise au sérieux, nomme le mécanisme comme une possibilité, puis pose la question qui départage. Une conclusion fausse peut abîmer une relation saine — c'est précisément ce que cette application doit éviter.
 4. Ne prête jamais d'intention à quelqu'un qui n'est pas là. Tu t'en tiens à ce que cette personne a dit ou fait, jamais à pourquoi elle l'a fait, même quand l'explication paraît évidente.
 
+# NE SUPPOSE PAS QU'ELLE VEUT PARLER À L'AUTRE
+Ne propose pas d'aller en parler avec l'autre personne, sauf si elle a dit vouloir le faire. Beaucoup de gens viennent pour comprendre, pour souffler ou pour décider — pas pour ouvrir une discussion. Suggérer une conversation qu'elle n'a pas demandée peut déclencher un conflit bien réel : l'autre entendrait « tu voulais me dire que… » alors qu'elle n'a jamais écrit ça. Si tu penses qu'une conversation aiderait, demande-lui d'abord si c'est ce qu'elle cherche.
+Ne lui prête jamais une intention ni des mots : tu ne sais pas ce qu'elle veut dire à l'autre, seulement ce qu'elle t'a écrit à toi.
+
+# NE VALIDE PAS UNE PHRASE BLESSANTE PARCE QU'ELLE VIENT D'ELLE
+Quand elle envisage de dire quelque chose de dur — surtout à un enfant — ne réponds pas seulement qu'elle en a le droit. Dis-lui l'effet probable de ces mots sur celui qui les reçoit, puis propose une autre façon de poser la même limite. Poser une limite ferme et menacer quelqu'un d'exclusion sont deux choses différentes : fais la différence. Une phrase comme « si ça ne te plaît pas, tu sais où est la porte », dite à un enfant, n'est pas une règle : c'est une menace d'abandon, et tu dois le dire.
+
 # QUATRE EXEMPLES DE RÉPONSES JUSTES
 Écris comme dans ces exemples. C'est le ton, le rythme et la façon d'entrer en matière qu'il faut reprendre.
 
@@ -1955,8 +1962,8 @@ function ModeGardeSheet({ enfant, modeGarde, onSave, onClose }) {
           <button key={v} onClick={() => setDemarrePar(v)} style={{ flex: 1, border: "none", cursor: "pointer", borderRadius: 12, padding: "11px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", background: demarrePar === v ? C.taupe : C.beigeSoft, color: demarrePar === v ? "#fff" : C.taupe }}>{l}</button>
         ))}
       </div>
-      <input type="date" value={debut} onChange={(e) => setDebut(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: C.ink, marginBottom: 14 }} />
-      <button onClick={() => onSave({ type, debut, demarrePar })} style={{ width: "100%", border: "none", cursor: "pointer", background: C.taupe, color: "#fff", borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit" }}>Appliquer ce mode de garde</button>
+      <input type="date" value={debut} onChange={(e) => setDebut(e.target.value)} style={{ width: "100%", boxSizing: "border-box", minWidth: 0, maxWidth: "100%", WebkitAppearance: "none", appearance: "none", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: C.ink, marginBottom: 14 }} />
+      <button onClick={() => { onSave({ type, debut, demarrePar }); if (onClose) onClose(); }} style={{ width: "100%", border: "none", cursor: "pointer", background: C.taupe, color: "#fff", borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit" }}>Appliquer ce mode de garde</button>
       <p style={{ fontSize: 11, color: C.inkSoft, marginTop: 10, lineHeight: 1.5 }}>Approximation raisonnable, notamment pour le 2-2-3 (qui a plusieurs variantes selon les familles) — les jours ponctuels restent modifiables un par un dans l'agenda.</p>
     </>
   );
@@ -1977,7 +1984,7 @@ function FicheEnfant({ enfant, estCoparent, photos, onSave, onDelete, onClose, o
   );
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", maxWidth: "100%", overflowX: "hidden" }}>
         <Tag>Fiche enfant</Tag>
         <button onClick={onClose} aria-label="Fermer" style={{ border: "none", background: C.grey, borderRadius: 999, width: 30, height: 30, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={15} color={C.ink} /></button>
       </div>
@@ -1992,7 +1999,7 @@ function FicheEnfant({ enfant, estCoparent, photos, onSave, onDelete, onClose, o
       <input value={prenom} onChange={(e) => setPrenom(e.target.value)} placeholder="Prénom" style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "13px 15px", fontSize: 15, fontWeight: 700, fontFamily: "inherit", color: C.ink, marginBottom: 10 }} />
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 11.5, fontWeight: 700, color: C.taupe, marginBottom: 5 }}>Date de naissance</div>
-        <input type="date" value={naissance} onChange={(e) => setNaissance(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 12, padding: "10px 13px", fontSize: 13.5, fontFamily: "inherit", color: C.ink }} />
+        <input type="date" value={naissance} onChange={(e) => setNaissance(e.target.value)} style={{ width: "100%", boxSizing: "border-box", minWidth: 0, maxWidth: "100%", WebkitAppearance: "none", appearance: "none", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 12, padding: "10px 13px", fontSize: 13.5, fontFamily: "inherit", color: C.ink }} />
       </div>
 
       {estCoparent && (
@@ -2048,7 +2055,7 @@ function NouvelEnfant({ onCreate, onClose }) {
         ))}
       </div>
       <input value={prenom} onChange={(e) => setPrenom(e.target.value)} placeholder="Prénom" autoFocus style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "13px 15px", fontSize: 15, fontFamily: "inherit", color: C.ink, marginBottom: 10 }} />
-      <input type="date" value={naissance} onChange={(e) => setNaissance(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "13px 15px", fontSize: 14, fontFamily: "inherit", color: C.ink, marginBottom: 16 }} />
+      <input type="date" value={naissance} onChange={(e) => setNaissance(e.target.value)} style={{ width: "100%", boxSizing: "border-box", minWidth: 0, maxWidth: "100%", WebkitAppearance: "none", appearance: "none", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "13px 15px", fontSize: 14, fontFamily: "inherit", color: C.ink, marginBottom: 16 }} />
       <button onClick={() => prenom.trim() && onCreate({ id: "c" + Date.now(), prenom: prenom.trim(), emoji, naissance, infos: {}, photos: [] })} disabled={!prenom.trim()} style={{ width: "100%", border: "none", cursor: prenom.trim() ? "pointer" : "default", background: prenom.trim() ? C.taupe : C.grey, color: prenom.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit" }}>Ajouter l'enfant</button>
     </>
   );
@@ -2485,7 +2492,7 @@ function TacheSheet({ tache, onSave, onDelete, onClose }) {
       </div>
 
       <div style={{ fontSize: 11.5, fontWeight: 700, color: C.taupe, marginBottom: 8 }}>Échéance (optionnel)</div>
-      <input type="date" value={echeance} onChange={(e) => setEcheance(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: C.ink, marginBottom: 8 }} />
+      <input type="date" value={echeance} onChange={(e) => setEcheance(e.target.value)} style={{ width: "100%", boxSizing: "border-box", minWidth: 0, maxWidth: "100%", WebkitAppearance: "none", appearance: "none", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: C.ink, marginBottom: 8 }} />
       <p style={{ fontSize: 11, color: C.inkSoft, lineHeight: 1.5, marginBottom: 16 }}>Une échéance posée ici apparaît automatiquement dans l'agenda partagé.</p>
 
       {questionAmbigue && (
@@ -2722,7 +2729,9 @@ function AjoutEvenement({ dateDefaut, evenement, type, aDesEnfants, onClose, onC
   const [alerte, setAlerte] = useState(ed ? ed.alerte : "aucune");
   const [cat, setCat] = useState(ed ? (CATS_EVENT.find((c) => c[0] === ed.cat) || CATS_EVENT[0]) : CATS_EVENT[0]);
   const inputStyle = { border: "none", outline: "none", background: C.grey, borderRadius: 10, padding: "7px 10px", fontSize: 13.5, fontFamily: "inherit", color: C.ink };
-  const selStyle = { ...inputStyle, cursor: "pointer" };
+  // minWidth:0 lève la largeur minimale qu'iOS impose aux champs date et heure :
+  // sans ça ils débordent du cadre et rendent toute la page déplaçable de côté.
+  const selStyle = { ...inputStyle, cursor: "pointer", minWidth: 0, maxWidth: "100%", WebkitAppearance: "none", appearance: "none" };
   const [verification, setVerification] = useState(false);
   const [filtrage, setFiltrage] = useState(null);
   const [questionAmbigue, setQuestionAmbigue] = useState(null);
@@ -4102,7 +4111,7 @@ export default function TamiseApp() {
 
   /* --- Coach (fil global) --- */
   const [coachMsgs, setCoachMsgs] = useState([
-    { de: "iris", texte: "Bonjour 🌿 Je suis Iris, une intelligence artificielle — pas une personne, et pas une professionnelle de santé. Je connais bien les mécanismes de manipulation et la communication non violente, et je connais déjà le contexte de tes échanges. Je suis là pour t'aider à y voir plus clair. Raconte-moi ce qui se passe, prends le temps qu'il te faut." },
+    { de: "iris", texte: "Bonjour 🌿 Je suis Iris, une intelligence artificielle — pas une personne. Je connais le contexte de tes échanges. Raconte-moi ce qui se passe." },
   ]);
   const [coachSaisie, setCoachSaisie] = useState("");
   const [coachCharge, setCoachCharge] = useState(false);
@@ -4414,13 +4423,16 @@ export default function TamiseApp() {
   }
   function attacherDoc(patch) {
     const idDoc = docCible.nouveau ? "d" + Date.now() : docCible.id;
+    const doc = { id: idDoc, nom: patch.nom, cat: patch.cat, fichier: !!patch.dataUrl, dataUrl: patch.dataUrl || null, nomFichier: patch.nomFichier || null };
     setRelations((rs) => rs.map((r) => {
       if (r.id !== relId) return r;
-      if (docCible.nouveau) {
-        return { ...r, docs: [...r.docs, { id: idDoc, nom: patch.nom, cat: patch.cat, fichier: !!patch.dataUrl, dataUrl: patch.dataUrl || null, nomFichier: patch.nomFichier || null }] };
-      }
+      if (docCible.nouveau) return r; // ajouté juste après par pushRel
       return { ...r, docs: r.docs.map((d) => (d.id === docCible.id ? { ...d, fichier: true, dataUrl: patch.dataUrl || d.dataUrl, nomFichier: patch.nomFichier || d.nomFichier } : d)) };
     }));
+    // Les documents sont un espace COMMUN : sans cet envoi, celui qui l'ajoute
+    // était le seul à le voir. C'était le cas depuis le début.
+    if (docCible.nouveau) pushRel("docs", doc);
+    else majElementPartage("docs", docCible.id, { fichier: true, dataUrl: patch.dataUrl || null, nomFichier: patch.nomFichier || null });
     // Le texte du document est extrait sur le serveur, pour qu'Iris puisse s'y
     // référer. Un jugement de 250 pages ne tient ni dans la mémoire du
     // téléphone ni dans une seule question posée au modèle : le serveur garde
