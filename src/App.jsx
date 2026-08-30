@@ -491,7 +491,9 @@ async function analyseAvecIA(text, rel) {
             "Réponds UNIQUEMENT en JSON strict, sans backticks : " +
             '{"niveau": "sain" | "problematique" | "grave" | "invalide", ' +
             '"reformulation": "version CNV respectueuse (null si grave, sain ou invalide) — proche du besoin réel de la personne, jamais un reproche déguisé en phrase polie : pas de sous-entendu, pas de sarcasme voilé, pas de ton passif-agressif sous couvert de gentillesse", ' +
+            "RÈGLE ABSOLUE SUR LA REFORMULATION : tu réécris SEULEMENT ce que la personne a voulu dire. Tu n'AJOUTES aucune intention, aucune proposition, aucune ouverture qu'elle n'a pas exprimée. N'ajoute JAMAIS de formules comme « est-ce qu'on peut en parler ? », « on pourrait en discuter », « j'aimerais qu'on trouve une solution ensemble », « je suis ouvert·e au dialogue » si elle ne l'a pas écrit : tu l'engagerais à une conversation qu'elle ne veut peut-être pas, et l'autre lui répondrait « mais tu voulais qu'on en parle » alors qu'elle n'a jamais dit ça. C'est une faute grave. Si le message d'origine est un refus, la reformulation reste un refus — polie, mais un refus. S'il n'annonce aucune suite, la reformulation n'en annonce aucune. " +
             '"detections": [{"passage": "extrait exact", "type": "<un mécanisme précis, voir liste>", "explication": "1-2 phrases pédagogiques, ton doux, tutoiement", "explicationRecue": "1-2 phrases", "ressource": "aucune"|"violence"|"juridique_general"|"juridique_enfants"|"exercice_cnv"}], ' +
+            "RÈGLE DE GRAMMAIRE, à appliquer strictement dans les DEUX explications : « je » ne doit jamais désigner toi, l'IA. Dans \"explication\", « tu » = la personne qui a écrit le message, et l'autre personne se dit « l'autre » ou « la personne à qui tu écris » — jamais « je », jamais un prénom. Dans \"explicationRecue\", « tu » = la personne qui reçoit le message, et l'expéditeur se dit « cette personne » — jamais « il », « elle », « je », ni un prénom. Relis chaque pronom avant de répondre : une confusion ici rend la fiche incompréhensible. " +
             "IMPORTANT — les deux explications n'ont PAS le même destinataire. \"explication\" est lue par la personne qui A ÉCRIT le message : tu lui expliques ce que ses mots produisent chez l'autre (« en écrivant ça, tu… »). \"explicationRecue\" est lue par la personne qui REÇOIT le message : tu t'adresses à elle, tu la tutoies, et tu désignes l'expéditeur par « cette personne » ou « la personne qui t'écrit » — jamais par un prénom, jamais par « il » ou « elle » dont tu ignores le genre. Tu lui expliques ce que ce passage cherche à produire CHEZ ELLE, et tu la déculpabilises (« ce n'est pas à toi de… », « tu n'as pas à… »). Exemple : explication = « En disant que tout est de sa faute, tu la mets en position de devoir se justifier. » / explicationRecue = « Cette personne te rend responsable de son état : ce n'est pas à toi de porter ça. » " +
             '"contradiction": {"source": "agenda"|"depense"|"tache", "refId": "id exact listé ci-dessous", "explication": "1-2 phrases factuelles, sans jamais accuser, invitant à vérifier"} ou null, ' +
             '"besoinProbable": "si niveau=grave uniquement : ta meilleure hypothèse sur le besoin réel derrière CE message précis, formulée pour compléter la phrase « ce dont tu as besoin, c\'est ... » (ex. « que les horaires convenus soient respectés », « de sentir que ton avis compte dans les décisions »). Un groupe nominal court, concret, fondé sur ce qui est écrit — jamais une formule toute faite ni une phrase complète. null sinon.", ' +
@@ -651,6 +653,22 @@ async function coachIA(history, question, rel) {
         }
       } catch (e) { /* documents indisponibles : Iris répond sans eux */ }
     }
+    // Textes de loi de référence. Iris ne peut citer QUE ce qui lui est
+    // fourni ici : sans ça elle répond de mémoire et invente des articles.
+    let loiTxt = "";
+    try {
+      const repLoi = await fetch(BACKEND_URL + "/api/textes-loi/recherche", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      const dl = await repLoi.json();
+      if (dl && dl.extraits && dl.extraits.length) {
+        loiTxt = " TEXTES DE LOI FRANÇAIS en rapport avec sa question. Tu peux les citer, en nommant l'article. Règles strictes : ne cite AUCUN article qui ne figure pas ci-dessous ; n'invente jamais un numéro d'article ni un contenu ; si ces textes ne répondent pas à sa question, dis simplement que tu n'as pas le texte qui répond, plutôt que de raisonner de mémoire. Précise toujours que tu donnes une information générale, que l'application à sa situation dépend de son jugement et des circonstances, et qu'un avocat, un point-justice ou le CIDFF pourra le lui confirmer gratuitement. " +
+          dl.extraits.map((e) => "[" + e.source + " — " + e.titre + "] « " + e.texte + " »").join("\n") + ".";
+      }
+    } catch (e) { /* textes indisponibles : Iris n'invente rien */ }
+
     const docsTxt = docsList.some((d) => d.fichier)
       ? " Documents ajoutés dans l'app par la personne : " +
         docsList.filter((d) => d.fichier).map((d) => d.nom).join(", ") +
@@ -704,7 +722,7 @@ Quel que soit le mécanisme, tu ne poses JAMAIS ça comme un diagnostic sur une 
 # Repères juridiques et portes de sortie (avec prudence)
 Quand la personne cherche ses options concrètes pour sortir d'une situation (violences, séparation, travail), tu peux donner des REPÈRES GÉNÉRAUX, en respectant 3 règles strictes :
 1. Tu précises toujours que ce sont des repères généraux, pas un conseil juridique personnalisé.
-2. Tu n'inventes JAMAIS un article de loi, un chiffre, un délai ou une procédure précise. Si tu n'es pas sûre, tu restes générale et tu orientes.
+2. Tu n'inventes JAMAIS un article de loi, un chiffre, un délai ou une procédure précise DE MÉMOIRE. Mais attention : quand des TEXTES DE LOI te sont fournis dans le contexte, ce ne sont pas des souvenirs, ce sont les textes officiels eux-mêmes. Dans ce cas tu DOIS les citer, en nommant l'article exact et en reprenant ses termes — c'est précisément ce que la personne est venue chercher, et lui répondre que tu n'es « pas une source officielle » alors que tu as le texte sous les yeux serait une dérobade inutile. Ne reste vague que si AUCUN texte fourni ne répond à sa question ; dis-lui alors franchement que tu n'as pas ce texte-là.
 3. Tu orientes systématiquement vers les vrais professionnels, gratuits et compétents.
 Repères que tu peux donner (France) :
 - Violences conjugales : la loi protège les victimes ; il est possible de demander une ordonnance de protection au juge, de déposer plainte, d'être accompagnée. Contacts : 3919 (écoute, gratuit, anonyme), CIDFF (information juridique gratuite), France Victimes (116 006), et le 17/112 en cas de danger immédiat.
@@ -813,6 +831,11 @@ Ne lui prête jamais une intention ni des mots : tu ne sais pas ce qu'elle veut 
 # NE VALIDE PAS UNE PHRASE BLESSANTE PARCE QU'ELLE VIENT D'ELLE
 Quand elle envisage de dire quelque chose de dur — surtout à un enfant — ne réponds pas seulement qu'elle en a le droit. Dis-lui l'effet probable de ces mots sur celui qui les reçoit, puis propose une autre façon de poser la même limite. Poser une limite ferme et menacer quelqu'un d'exclusion sont deux choses différentes : fais la différence. Une phrase comme « si ça ne te plaît pas, tu sais où est la porte », dite à un enfant, n'est pas une règle : c'est une menace d'abandon, et tu dois le dire.
 
+# QUAND ELLE DEMANDE DE L'AIDE, DONNE-LUI DE L'AIDE
+« Qu'est-ce que je peux faire ? », « comment je fais ? », « aide-moi » : ce sont des demandes de conseils concrets. Réponds-y VRAIMENT, dans cette réponse-ci, sans lui redemander la permission.
+Ne réponds jamais par « est-ce que tu veux qu'on cherche ensemble comment… ? » : elle vient de te le demander, lui reposer la question donne le sentiment de ne pas être entendue et l'oblige à redemander.
+Donne deux ou trois pistes concrètes, applicables dès aujourd'hui, adaptées à ce qu'elle a raconté — pas des généralités. Tu peux proposer d'approfondir APRÈS avoir donné ces pistes, jamais à la place.
+
 # QUATRE EXEMPLES DE RÉPONSES JUSTES
 Écris comme dans ces exemples. C'est le ton, le rythme et la façon d'entrer en matière qu'il faut reprendre.
 
@@ -875,7 +898,7 @@ Est-ce qu'il y a quelqu'un d'autre à la maison qui pourrait prendre une partie 
     // Consignes, contexte et paroles de la personne sont désormais séparés.
     // Le contexte part dans un second message « system » : c'est de la
     // documentation sur la relation, pas quelque chose que la personne a dit.
-    const contexte = (faitsTxt + tachesTxt + enfantsTxt + messagesTxt + journalTxt + questionnaireTxt + docsTxt + extraitsTxt).trim();
+    const contexte = (faitsTxt + tachesTxt + enfantsTxt + messagesTxt + journalTxt + questionnaireTxt + docsTxt + extraitsTxt + loiTxt).trim();
     const messages = [{ role: "system", content: SYS_IRIS }];
     if (contexte) {
       messages.push({ role: "system", content: "Contexte de la relation, fourni par l'application (ce n'est PAS la personne qui parle ici) :\n" + contexte });
@@ -4110,9 +4133,19 @@ export default function TamiseApp() {
   }
 
   /* --- Coach (fil global) --- */
-  const [coachMsgs, setCoachMsgs] = useState([
-    { de: "iris", texte: "Bonjour 🌿 Je suis Iris, une intelligence artificielle — pas une personne. Je connais le contexte de tes échanges. Raconte-moi ce qui se passe." },
-  ]);
+  // La conversation avec Iris appartient à la relation, pas à l'application :
+  // chaque lien a la sienne, on la retrouve en revenant dessus, et changer de
+  // relation ouvre une conversation neuve. Une remarque sur son ex n'a rien à
+  // faire dans le fil consacré à sa sœur.
+  const ACCUEIL_IRIS = { de: "iris", texte: "Bonjour 🌿 Je suis Iris, une intelligence artificielle — pas une personne. Je connais le contexte de tes échanges. Raconte-moi ce qui se passe." };
+  const coachMsgs = (rel && rel.coachMsgs && rel.coachMsgs.length) ? rel.coachMsgs : [ACCUEIL_IRIS];
+  const setCoachMsgs = (maj) => {
+    setRelations((rs) => rs.map((r) => {
+      if (r.id !== relId) return r;
+      const actuel = (r.coachMsgs && r.coachMsgs.length) ? r.coachMsgs : [ACCUEIL_IRIS];
+      return { ...r, coachMsgs: typeof maj === "function" ? maj(actuel) : maj };
+    }));
+  };
   const [coachSaisie, setCoachSaisie] = useState("");
   const [coachCharge, setCoachCharge] = useState(false);
   const [coachAjoutes, setCoachAjoutes] = useState({}); // index -> true une fois ajouté au journal
