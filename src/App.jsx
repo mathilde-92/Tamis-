@@ -508,6 +508,8 @@ async function analyseAvecIA(text, rel) {
             '"reformulation": "version CNV respectueuse (null si grave, sain ou invalide) — proche du besoin réel de la personne, jamais un reproche déguisé en phrase polie : pas de sous-entendu, pas de sarcasme voilé, pas de ton passif-agressif sous couvert de gentillesse", ' +
             "RÈGLE ABSOLUE SUR LA REFORMULATION : tu réécris SEULEMENT ce que la personne a voulu dire. Tu n'AJOUTES aucune intention, aucune proposition, aucune ouverture qu'elle n'a pas exprimée. N'ajoute JAMAIS de formules comme « est-ce qu'on peut en parler ? », « on pourrait en discuter », « j'aimerais qu'on trouve une solution ensemble », « je suis ouvert·e au dialogue » si elle ne l'a pas écrit : tu l'engagerais à une conversation qu'elle ne veut peut-être pas, et l'autre lui répondrait « mais tu voulais qu'on en parle » alors qu'elle n'a jamais dit ça. C'est une faute grave. Si le message d'origine est un refus, la reformulation reste un refus — polie, mais un refus. S'il n'annonce aucune suite, la reformulation n'en annonce aucune. " +
             '"detections": [{"passage": "extrait exact", "type": "<un mécanisme précis, voir liste>", "explication": "1-2 phrases pédagogiques, ton doux, tutoiement", "explicationRecue": "1-2 phrases", "ressource": "aucune"|"violence"|"juridique_general"|"juridique_enfants"|"exercice_cnv"}], ' +
+            "AVANT TOUT : identifie QUI FAIT QUOI À QUI. Le message que tu analyses est écrit par l'expéditeur et adressé au destinataire. Quand le message dit « tu », c'est le DESTINATAIRE qui est visé. Une phrase comme « comment tu fais pour ne pas te jeter par la fenêtre ? » n'est PAS une détresse de celui qui écrit : c'est une incitation au suicide adressée à celui qui reçoit, et c'est parmi les choses les plus graves qu'on puisse écrire. Ne confonds jamais les deux : inverser l'auteur et la cible transforme une agression en appel à l'aide, et fait dire à l'app exactement le contraire de ce qui se passe. " +
+            "Toute phrase qui invite le destinataire à mourir, à disparaître, à se faire du mal — même sous forme de question, d'ironie ou de sous-entendu (« tu ferais mieux de ne pas être né », « le monde irait mieux sans toi ») — est de niveau « grave », sans exception. " +
             "RÈGLE DE GRAMMAIRE, à appliquer strictement dans les DEUX explications : « je » ne doit jamais désigner toi, l'IA. Dans \"explication\", « tu » = la personne qui a écrit le message, et l'autre personne se dit « l'autre » ou « la personne à qui tu écris » — jamais « je », jamais un prénom. Dans \"explicationRecue\", « tu » = la personne qui reçoit le message, et l'expéditeur se dit « cette personne » — jamais « il », « elle », « je », ni un prénom. Relis chaque pronom avant de répondre : une confusion ici rend la fiche incompréhensible. " +
             "IMPORTANT — les deux explications n'ont PAS le même destinataire. \"explication\" est lue par la personne qui A ÉCRIT le message : tu lui expliques ce que ses mots produisent chez l'autre (« en écrivant ça, tu… »). \"explicationRecue\" est lue par la personne qui REÇOIT le message : tu t'adresses à elle, tu la tutoies, et tu désignes l'expéditeur par « cette personne » ou « la personne qui t'écrit » — jamais par un prénom, jamais par « il » ou « elle » dont tu ignores le genre. Tu lui expliques ce que ce passage cherche à produire CHEZ ELLE, et tu la déculpabilises (« ce n'est pas à toi de… », « tu n'as pas à… »). Exemple : explication = « En disant que tout est de sa faute, tu la mets en position de devoir se justifier. » / explicationRecue = « Cette personne te rend responsable de son état : ce n'est pas à toi de porter ça. » " +
             '"contradiction": {"source": "agenda"|"depense"|"tache", "refId": "id exact listé ci-dessous", "explication": "1-2 phrases factuelles, sans jamais accuser, invitant à vérifier"} ou null, ' +
@@ -515,6 +517,7 @@ async function analyseAvecIA(text, rel) {
             "QUAND REMPLIR « alerteDroit » (sinon null) : uniquement si le message AFFIRME quelque chose de FAUX sur un DROIT ou un DEVOIR — pas une simple pression (ça, c'est un mécanisme, tu l'as déjà traité plus haut). Deux cas seulement : " +
             "  • statut \"faux\" : l'affirmation est juridiquement fausse À COUP SÛR, sans qu'aucun fait ne manque (ex. « j'arrête de payer la pension parce que j'en ai marre » → c'est un délit). « message » explique à l'expéditeur, avec douceur mais clairement, que ce n'est pas dans son droit, en citant l'article fourni s'il y en a un. " +
             "  • statut \"aClarifier\" : l'affirmation POURRAIT être abusive mais il te manque un fait pour trancher (ex. « tu dois me rembourser la moitié des affaires des enfants » → juste seulement s'il y a eu accord préalable). « question » est la question de fait à poser à l'expéditeur AVANT d'envoyer (ex. « Cet achat a-t-il été décidé ensemble à l'avance ? »). Ne tranche pas tant que tu n'as pas la réponse. " +
+            "CAS PARTICULIER, très fréquent : dans une relation de coparentalité, quand le message annonce ou impose un CHANGEMENT du calendrier de garde décidé unilatéralement (« je ne prends pas les enfants cette semaine », « c'est toi qui les gardes », « je te les ramène demain au lieu de dimanche »), remplis « alerteDroit » avec statut \"faux\". Un calendrier de garde fixé par un jugement ou une convention s'impose aux DEUX parents : aucun ne peut le modifier seul. Il faut l'accord de l'autre, ou une nouvelle décision du juge. Le message doit le rappeler avec douceur, sans accuser, et inviter à demander l'accord de l'autre plutôt qu'à l'annoncer. " +
             "Ne remplis JAMAIS « alerteDroit » pour une affirmation vague, une opinion, une pression émotionnelle, ou un sujet sans enjeu de droit réel (« tu dois finir ton assiette » n'est PAS un sujet de droit). Ne cite un article de loi que s'il t'a été fourni ci-dessus, mot pour mot. Si tu n'as pas de texte qui s'applique mais que tu es certain·e que c'est faux, tu peux quand même alerter en restant général et en invitant à vérifier auprès d'un professionnel, sans inventer de numéro d'article. " +
             '"besoinProbable": "si niveau=grave uniquement : ta meilleure hypothèse sur le besoin réel derrière CE message précis, formulée pour compléter la phrase « ce dont tu as besoin, c\'est ... » (ex. « que les horaires convenus soient respectés », « de sentir que ton avis compte dans les décisions »). Un groupe nominal court, concret, fondé sur ce qui est écrit — jamais une formule toute faite ni une phrase complète. null sinon.", ' +
             '"clarification": "si niveau=grave et que le besoin n\'est vraiment pas clair à la lecture : UNE question courte et concrète à poser à la personne pour comprendre ce qu\'elle veut dire, avant de l\'aider à reformuler. null si le besoin est déjà assez clair pour proposer une reformulation directement."}. ' +
@@ -3803,6 +3806,11 @@ export default function TamiseApp() {
   // Le tutoriel ne s'affiche qu'au tout premier lancement sur cet appareil.
   const [onboarding, setOnboarding] = useState(() => !chargerLocal("dejaVenu", false));
   const [onboardingSlide, setOnboardingSlide] = useState(0); // slide de départ du tutoriel
+  // Petit guide des boutons, juste après le tutoriel : deux étapes, pas plus.
+  // Le tutoriel explique à quoi sert l'app ; ce guide-ci montre seulement OÙ
+  // appuyer, pour ne pas noyer la personne sous les explications.
+  const [guideEtape, setGuideEtape] = useState(() => (chargerLocal("guideVu", false) ? null : 0));
+  const fermerGuide = () => { setGuideEtape(null); enregistrerLocal("guideVu", true); };
   const [vueDestinataire, setVueDestinataire] = useState(false);
   const [pinCode, setPinCode] = useState(null);      // code de verrouillage de l'app (null = pas activé)
   const [verrouille, setVerrouille] = useState(false);
@@ -3841,12 +3849,29 @@ export default function TamiseApp() {
     const t2 = (r.listes || []).reduce((m, l) => m + (l.items || []).filter((it) => it.proposePar === "autre" && !vues.includes(it.id)).length, 0);
     return n + t1 + t2;
   }, 0);
-  const badges = { messages: messagesNonVus, agenda: agendaEnAttente, depenses: depensesEnAttente, plus: tachesEnAttente };
+  // Notes de passage écrites par l'autre et pas encore lues : sans pastille,
+  // personne ne saurait jamais qu'une note a été laissée.
+  const notesNonVuesTotal = relations.reduce((n, r) => n + (r.notesPassage || [])
+    .filter((np) => np && np.proposePar === "autre" && !(r.notesVues || []).includes(np.id)).length, 0);
+  const badges = { messages: messagesNonVus, agenda: agendaEnAttente, depenses: depensesEnAttente, plus: tachesEnAttente + notesNonVuesTotal };
   // Même chose mais uniquement pour la relation actuellement ouverte (pas le total
   // toutes relations confondues) : sert à la pastille de la tuile « Tâches » du menu Plus.
+  const notesNonVuesRel = (rel.notesPassage || [])
+    .some((np) => np && np.proposePar === "autre" && !(rel.notesVues || []).includes(np.id));
   const tachesEnAttenteRel =
     (rel.groupesTaches || []).some((g) => (g.taches || []).some((t) => t.confirmation === "attente" && t.proposePar === "autre" && !(rel.tachesVues || []).includes(t.id)))
     || (rel.listes || []).some((l) => (l.items || []).some((it) => it.proposePar === "autre" && !(rel.tachesVues || []).includes(it.id)));
+
+  // Marque les notes de passage comme lues dès l'ouverture de l'écran Enfants,
+  // pour que la pastille s'éteigne une fois l'information vue.
+  useEffect(() => {
+    if (!(tab === "plus" && plusVue === "enfants") || rel.id === "vide") return;
+    const vues = rel.notesVues || [];
+    const aVoir = (rel.notesPassage || [])
+      .filter((np) => np && np.proposePar === "autre" && !vues.includes(np.id))
+      .map((np) => np.id);
+    if (aVoir.length) patchRel({ notesVues: [...vues, ...aVoir] });
+  }, [tab, plusVue, relId, rel.notesPassage]);
 
   // Marque tâches et éléments de liste comme vus dès l'ouverture de l'écran
   // Tâches — sans ça, la pastille de « Plus » ne s'éteindrait jamais.
@@ -4760,6 +4785,40 @@ export default function TamiseApp() {
           }} />
         )}
 
+        {/* ---------- Petit guide des boutons (une seule fois) ---------- */}
+        {guideEtape !== null && !onboarding && !codeInvitation && !verrouille && (
+          <div onClick={() => (guideEtape === 0 ? setGuideEtape(1) : fermerGuide())}
+            style={{ position: "absolute", inset: 0, zIndex: 60, background: "rgba(69,62,54,0.55)", display: "flex", flexDirection: "column", justifyContent: guideEtape === 0 ? "flex-start" : "flex-end", padding: 18, paddingTop: guideEtape === 0 ? 92 : 18, paddingBottom: guideEtape === 0 ? 18 : 104 }}>
+            {guideEtape === 0 ? (
+              <div style={{ alignSelf: "flex-end", maxWidth: 250 }}>
+                <div style={{ fontSize: 30, textAlign: "right", marginRight: 26, marginBottom: -2 }}>↑</div>
+                <div style={{ background: C.card, borderRadius: 20, padding: "15px 17px", boxShadow: "0 10px 30px rgba(0,0,0,0.25)" }}>
+                  <div style={{ fontFamily: "'Fraunces', serif", fontSize: 16.5, color: C.ink, marginBottom: 5 }}>Commence ici</div>
+                  <p style={{ margin: 0, fontSize: 13.5, color: C.inkSoft, lineHeight: 1.5 }}>
+                    Ce bouton crée une nouvelle relation. Tout dans Tamisé — messages, agenda, dépenses — appartient à une relation précise.
+                  </p>
+                  <div style={{ fontSize: 12, color: C.taupe, fontWeight: 700, marginTop: 11 }}>Touche l'écran pour continuer →</div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ maxWidth: 320, alignSelf: "center" }}>
+                <div style={{ background: C.card, borderRadius: 20, padding: "15px 17px", boxShadow: "0 10px 30px rgba(0,0,0,0.25)" }}>
+                  <div style={{ fontFamily: "'Fraunces', serif", fontSize: 16.5, color: C.ink, marginBottom: 8 }}>Les cinq onglets</div>
+                  <div style={{ fontSize: 13, color: C.inkSoft, lineHeight: 1.65 }}>
+                    <div><b style={{ color: C.ink }}>Messages</b> — vos échanges, filtrés avant d'être envoyés.</div>
+                    <div><b style={{ color: C.ink }}>Agenda</b> — ce qui est prévu, à valider par les deux.</div>
+                    <div><b style={{ color: C.ink }}>Iris</b> — pour en parler en privé. L'autre n'y a jamais accès.</div>
+                    <div><b style={{ color: C.ink }}>Dépenses</b> — qui a payé quoi, et ce qui reste à régler.</div>
+                    <div><b style={{ color: C.ink }}>Plus</b> — enfants, documents, journal, réglages.</div>
+                  </div>
+                  <div style={{ fontSize: 12, color: C.taupe, fontWeight: 700, marginTop: 12 }}>Touche l'écran pour commencer</div>
+                </div>
+                <div style={{ fontSize: 30, textAlign: "center", marginTop: -2 }}>↓</div>
+              </div>
+            )}
+          </div>
+        )}
+
         {onboarding && !codeInvitation && (
           <Onboarding genre={genre} setGenre={setGenre} onFinish={() => { setOnboarding(false); if (pinCode) setVerrouille(true); }} startSlide={onboardingSlide}
             onCreerPremiereRelation={(nom, type) => {
@@ -5204,7 +5263,7 @@ export default function TamiseApp() {
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                     {communs.map((e) => {
                       const Ic = e.icone;
-                      const aNotifier = e.id === "taches" && tachesEnAttenteRel;
+                      const aNotifier = (e.id === "taches" && tachesEnAttenteRel) || (e.id === "enfants" && notesNonVuesRel);
                       return (
                         <Card key={e.id} onClick={() => setPlusVue(e.id)} style={{ cursor: "pointer", padding: 15, textAlign: "center" }}>
                           <div style={{ position: "relative", width: 40, height: 40, margin: "0 auto 9px" }}>
@@ -5590,7 +5649,7 @@ export default function TamiseApp() {
               {/* Niveau de protection : chacun règle ce qu'IL reçoit, pour cette
                   relation. L'autre personne n'en est jamais informée. */}
               <Card style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: C.ink, marginBottom: 3 }}>Comment tu veux lire les messages de {partenaire}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: C.ink, marginBottom: 3 }}>Comment veux-tu lire les messages de {partenaire}</div>
                 <div style={{ fontSize: 12, color: C.inkSoft, lineHeight: 1.45, marginBottom: 10 }}>
                   Ce choix n'appartient qu'à toi : {partenaire} n'en est pas informé{accordGenre("·e", genre)}. Il ne vaut que pour la suite, jamais pour les messages déjà reçus. Dans tous les cas, une menace reste bloquée.
                 </div>
@@ -5908,17 +5967,28 @@ export default function TamiseApp() {
                                         : <>Je n'ai pas réussi à cerner ce dont tu as besoin dans ce message. Dis-le-moi avec tes mots : qu'est-ce que tu voudrais qu'il se passe ?</>}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                    <button onClick={() => envoyerReformulationGrave(dialogueGrave.besoinProbable, true)} disabled={chargeReformulationGrave}
-                      style={{ flex: 1, border: "none", cursor: "pointer", background: C.taupe, color: "#fff", borderRadius: 16, padding: "13px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-                      {chargeReformulationGrave && <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} />}
-                      Oui, c'est ça
-                    </button>
+                  {/* Les boutons ne conviennent que si Iris a VRAIMENT proposé une
+                      hypothèse. Quand elle n'a rien cerné et pose une question
+                      ouverte, répondre « oui c'est ça » n'aurait aucun sens :
+                      on passe directement à la zone de réponse libre. */}
+                  {dialogueGrave.besoinProbable ? (
+                    <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                      <button onClick={() => envoyerReformulationGrave(dialogueGrave.besoinProbable, true)} disabled={chargeReformulationGrave}
+                        style={{ flex: 1, border: "none", cursor: "pointer", background: C.taupe, color: "#fff", borderRadius: 16, padding: "13px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+                        {chargeReformulationGrave && <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} />}
+                        Oui, c'est ça
+                      </button>
+                      <button onClick={() => setDialogueGrave({ ...dialogueGrave, etape: "preciser" })} disabled={chargeReformulationGrave}
+                        style={{ flex: 1, border: `1.5px solid ${C.grey}`, cursor: "pointer", background: C.card, color: C.taupe, borderRadius: 16, padding: "13px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>
+                        Pas vraiment…
+                      </button>
+                    </div>
+                  ) : (
                     <button onClick={() => setDialogueGrave({ ...dialogueGrave, etape: "preciser" })} disabled={chargeReformulationGrave}
-                      style={{ flex: 1, border: `1.5px solid ${C.grey}`, cursor: "pointer", background: C.card, color: C.taupe, borderRadius: 16, padding: "13px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>
-                      Pas vraiment…
+                      style={{ width: "100%", marginTop: 12, border: "none", cursor: "pointer", background: C.taupe, color: "#fff", borderRadius: 16, padding: "13px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>
+                      Lui répondre
                     </button>
-                  </div>
+                  )}
                 </>
               )}
 
