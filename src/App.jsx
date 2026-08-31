@@ -2100,7 +2100,7 @@ function NouvelEnfant({ onCreate, onClose }) {
       </div>
       <input value={prenom} onChange={(e) => setPrenom(e.target.value)} placeholder="Prénom" autoFocus style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "13px 15px", fontSize: 15, fontFamily: "inherit", color: C.ink, marginBottom: 10 }} />
       <input type="date" value={naissance} onChange={(e) => setNaissance(e.target.value)} style={{ width: "100%", boxSizing: "border-box", minWidth: 0, maxWidth: "100%", WebkitAppearance: "none", appearance: "none", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "13px 15px", fontSize: 14, fontFamily: "inherit", color: C.ink, marginBottom: 16 }} />
-      <button onClick={() => prenom.trim() && onCreate({ id: "c" + Date.now(), prenom: prenom.trim(), emoji, naissance, infos: {}, photos: [] })} disabled={!prenom.trim()} style={{ width: "100%", border: "none", cursor: prenom.trim() ? "pointer" : "default", background: prenom.trim() ? C.taupe : C.grey, color: prenom.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit" }}>Ajouter l'enfant</button>
+      <button onClick={(e) => { e.stopPropagation(); if (prenom.trim()) onCreate({ id: "c" + Date.now(), prenom: prenom.trim(), emoji, naissance, infos: {}, photos: [] }); }} disabled={!prenom.trim()} style={{ width: "100%", border: "none", cursor: prenom.trim() ? "pointer" : "default", background: prenom.trim() ? C.taupe : C.grey, color: prenom.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit" }}>Ajouter l'enfant</button>
     </>
   );
 }
@@ -3932,7 +3932,7 @@ export default function TamiseApp() {
       ? { ...r, [champ]: (r[champ] || []).map((x) => (x && x.id === id ? { ...x, ...patch } : x)) }
       : r)));
     if (rel.relationId && CHAMPS_PARTAGES.includes(champ)) {
-      envoyerElementServeur(rel.relationId, "maj", MON_APPAREIL, { champ, id, patchElement: sansOriginalSiProtege(patch) }).catch(() => {});
+      envoyerElementServeur(rel.relationId, "maj", MON_APPAREIL, { champ, id, patchElement: patch }).catch(() => {});
     }
   };
 
@@ -6037,7 +6037,13 @@ export default function TamiseApp() {
 
         {nouvelEnfant && (
           <BottomSheet onClose={() => setNouvelEnfant(false)}>
-            <NouvelEnfant onClose={() => setNouvelEnfant(false)} onCreate={(enf) => { pushRel("enfants", enf); setNouvelEnfant(false); }} />
+            <NouvelEnfant onClose={() => setNouvelEnfant(false)} onCreate={(enf) => {
+              pushRel("enfants", enf);
+              setNouvelEnfant(false);
+              // On enchaîne sur la fiche complète : sinon il faut ressortir puis
+              // recliquer sur l'enfant pour renseigner le mode de garde, la taille…
+              setEnfantOuvert(enf);
+            }} />
           </BottomSheet>
         )}
 
