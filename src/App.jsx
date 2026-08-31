@@ -1144,6 +1144,65 @@ function BoutonsUrgence() {
   );
 }
 
+/* ---- Export vers Google Agenda, l'agenda iPhone, Outlook… ----
+   Le format .ics est compris par tous les agendas. On n'a donc besoin d'aucune
+   autorisation Google : la personne ouvre le fichier, son agenda propose de
+   l'ajouter, et c'est fait. Le fichier est fabriqué sur le téléphone, rien ne
+   transite par un serveur. */
+function versDateICS(iso, allDay) {
+  // "2026-03-14T09:30" → "20260314T093000" ; jour entier → "20260314"
+  const propre = (iso || "").replace(/[-:]/g, "");
+  if (allDay) return propre.slice(0, 8);
+  const [d, h] = propre.split("T");
+  return d + "T" + (h || "090000").padEnd(6, "0");
+}
+
+function echapperICS(txt) {
+  return String(txt || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+}
+
+function fabriquerICS(evenements, nomAgenda) {
+  const lignes = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Tamise//FR", "CALSCALE:GREGORIAN",
+    "X-WR-CALNAME:" + echapperICS(nomAgenda || "Tamisé"),
+  ];
+  evenements.forEach((e) => {
+    const jourEntier = !!e.allDay;
+    lignes.push("BEGIN:VEVENT");
+    lignes.push("UID:" + (e.id || Date.now()) + "@tamise");
+    lignes.push("DTSTAMP:" + versDateICS(new Date().toISOString().slice(0, 16), false) + "Z");
+    if (jourEntier) {
+      lignes.push("DTSTART;VALUE=DATE:" + versDateICS(e.start, true));
+      lignes.push("DTEND;VALUE=DATE:" + versDateICS(e.end || e.start, true));
+    } else {
+      lignes.push("DTSTART:" + versDateICS(e.start, false));
+      lignes.push("DTEND:" + versDateICS(e.end || e.start, false));
+    }
+    lignes.push("SUMMARY:" + echapperICS(e.titre));
+    if (e.cat) lignes.push("CATEGORIES:" + echapperICS(e.cat));
+    if (e.recurrence === "semaine") lignes.push("RRULE:FREQ=WEEKLY");
+    if (e.recurrence === "quinzaine") lignes.push("RRULE:FREQ=WEEKLY;INTERVAL=2");
+    if (e.recurrence === "mois") lignes.push("RRULE:FREQ=MONTHLY");
+    lignes.push("END:VEVENT");
+  });
+  lignes.push("END:VCALENDAR");
+  return lignes.join("\r\n");
+}
+
+function telechargerICS(evenements, nomFichier, nomAgenda) {
+  try {
+    const blob = new Blob([fabriquerICS(evenements, nomAgenda)], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (nomFichier || "tamise") + ".ics";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (err) { /* export indisponible : on ne casse rien */ }
+}
+
 const BottomSheet = ({ onClose, children }) => (
   <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(69,62,54,0.35)", zIndex: 40, display: "flex", alignItems: "flex-end" }}>
     <div onClick={(e) => e.stopPropagation()} className="voile" style={{ ...BG_LAYERED, borderRadius: "26px 26px 0 0", padding: 22, width: "100%", maxHeight: "85%", overflowY: "auto", boxShadow: "0 -12px 40px rgba(69,62,54,0.18)" }}>
@@ -4272,6 +4331,7 @@ export default function TamiseApp() {
   const [noteLibreOuverte, setNoteLibreOuverte] = useState(false);
   const [rechercheMsg, setRechercheMsg] = useState(""); // "" = fermé/vide
   const [rechercheMsgOuverte, setRechercheMsgOuverte] = useState(false);
+  const [abonnementOuvert, setAbonnementOuvert] = useState(false);
   const [rechercheAgendaOuverte, setRechercheAgendaOuverte] = useState(false);
   const [rechercheAgenda, setRechercheAgenda] = useState("");
   const [rechercheDepenseOuverte, setRechercheDepenseOuverte] = useState(false);
@@ -4785,35 +4845,103 @@ export default function TamiseApp() {
           }} />
         )}
 
+        {/* ---------- S'abonner à l'agenda depuis son calendrier ---------- */}
+        {abonnementOuvert && (
+          <BottomSheet onClose={() => setAbonnementOuvert(false)}>
+            {(() => {
+              const lien = BACKEND_URL.replace(/^https?:/, "webcal:") + "/api/agenda/" + rel.relationId + ".ics";
+              const lienHttps = BACKEND_URL + "/api/agenda/" + rel.relationId + ".ics";
+              return (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Tag>Agenda</Tag>
+                    <button onClick={() => setAbonnementOuvert(false)} aria-label="Fermer" style={{ border: "none", background: C.grey, borderRadius: 999, width: 30, height: 30, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={15} color={C.ink} /></button>
+                  </div>
+                  <div style={{ fontFamily: "'Fraunces', serif", fontSize: 20, color: C.ink, marginTop: 12 }}>Retrouve cet agenda dans le tien</div>
+                  <p style={{ fontSize: 13.5, color: C.inkSoft, lineHeight: 1.55, marginTop: 8 }}>
+                    Ton agenda habituel — iPhone, Google, Outlook — peut afficher les événements de Tamisé et se mettre à jour tout seul. Tu n'as rien à réimporter quand quelque chose change.
+                  </p>
+                  <p style={{ fontSize: 13.5, color: C.inkSoft, lineHeight: 1.55, marginTop: 8 }}>
+                    Seuls les événements <b style={{ color: C.ink }}>déjà validés par vous deux</b> y apparaissent. Ce qui attend encore l'accord de {partenaire} reste dans Tamisé.
+                  </p>
+
+                  <a href={lien} style={{ display: "block", textAlign: "center", textDecoration: "none", marginTop: 16, background: C.taupe, color: "#fff", borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700 }}>
+                    Ajouter à mon agenda
+                  </a>
+                  <button onClick={() => { try { navigator.clipboard.writeText(lienHttps); } catch (e) {} }}
+                    style={{ width: "100%", marginTop: 8, border: `1.5px solid ${C.grey}`, cursor: "pointer", background: C.card, color: C.taupe, borderRadius: 16, padding: "13px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>
+                    Copier l'adresse
+                  </button>
+                  <p style={{ fontSize: 11.5, color: C.inkSoft, lineHeight: 1.5, marginTop: 12 }}>
+                    Si le bouton ne fait rien, copie l'adresse et colle-la dans ton agenda : sur iPhone, Réglages → Calendrier → Comptes → Ajouter un abonnement ; sur Google Agenda, Autres agendas → À partir de l'URL.
+                  </p>
+                  <div style={{ background: C.beigeSoft, borderRadius: 14, padding: "12px 14px", marginTop: 14, fontSize: 12, color: C.ink, lineHeight: 1.55 }}>
+                    <b>Garde cette adresse pour toi.</b> Elle donne accès à l'agenda de cette relation, sans mot de passe. Ne la partage qu'avec des personnes de confiance.
+                  </div>
+                </>
+              );
+            })()}
+          </BottomSheet>
+        )}
+
         {/* ---------- Petit guide des boutons (une seule fois) ---------- */}
         {guideEtape !== null && !onboarding && !codeInvitation && !verrouille && (
           <div onClick={() => (guideEtape === 0 ? setGuideEtape(1) : fermerGuide())}
-            style={{ position: "absolute", inset: 0, zIndex: 60, background: "rgba(69,62,54,0.55)", display: "flex", flexDirection: "column", justifyContent: guideEtape === 0 ? "flex-start" : "flex-end", padding: 18, paddingTop: guideEtape === 0 ? 92 : 18, paddingBottom: guideEtape === 0 ? 18 : 104 }}>
+            style={{ position: "absolute", inset: 0, zIndex: 60, background: "rgba(58,52,45,0.62)", backdropFilter: "blur(2px)", WebkitBackdropFilter: "blur(2px)", display: "flex", flexDirection: "column", justifyContent: guideEtape === 0 ? "flex-start" : "flex-end", padding: 20, paddingTop: guideEtape === 0 ? 86 : 20, paddingBottom: guideEtape === 0 ? 20 : 96 }}>
+
             {guideEtape === 0 ? (
-              <div style={{ alignSelf: "flex-end", maxWidth: 250 }}>
-                <div style={{ fontSize: 30, textAlign: "right", marginRight: 26, marginBottom: -2 }}>↑</div>
-                <div style={{ background: C.card, borderRadius: 20, padding: "15px 17px", boxShadow: "0 10px 30px rgba(0,0,0,0.25)" }}>
-                  <div style={{ fontFamily: "'Fraunces', serif", fontSize: 16.5, color: C.ink, marginBottom: 5 }}>Commence ici</div>
-                  <p style={{ margin: 0, fontSize: 13.5, color: C.inkSoft, lineHeight: 1.5 }}>
-                    Ce bouton crée une nouvelle relation. Tout dans Tamisé — messages, agenda, dépenses — appartient à une relation précise.
+              <div style={{ alignSelf: "flex-end", maxWidth: 268, position: "relative" }}>
+                {/* Petite pointe orientée vers le bouton « + », dessinée plutôt qu'écrite */}
+                <svg width="26" height="16" viewBox="0 0 26 16" style={{ position: "absolute", top: -14, right: 22 }}>
+                  <path d="M13 0 L26 16 L0 16 Z" fill={C.card} />
+                </svg>
+                <div style={{ background: C.card, borderRadius: 22, padding: "18px 19px", boxShadow: "0 18px 44px rgba(35,30,25,0.34)" }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 1.1, color: C.taupe, textTransform: "uppercase", marginBottom: 7 }}>Première étape</div>
+                  <div style={{ fontFamily: "'Fraunces', serif", fontSize: 19, color: C.ink, lineHeight: 1.25, marginBottom: 7 }}>Crée ta première relation</div>
+                  <p style={{ margin: 0, fontSize: 13.5, color: C.inkSoft, lineHeight: 1.55 }}>
+                    Tout dans Tamisé appartient à une relation : les messages, l'agenda, les dépenses. C'est par là qu'on commence.
                   </p>
-                  <div style={{ fontSize: 12, color: C.taupe, fontWeight: 700, marginTop: 11 }}>Touche l'écran pour continuer →</div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 15 }}>
+                    <div style={{ display: "flex", gap: 5 }}>
+                      <span style={{ width: 18, height: 4, borderRadius: 999, background: C.taupe }} />
+                      <span style={{ width: 6, height: 4, borderRadius: 999, background: C.grey }} />
+                    </div>
+                    <span style={{ fontSize: 12.5, color: C.taupe, fontWeight: 700 }}>Suivant</span>
+                  </div>
                 </div>
               </div>
             ) : (
-              <div style={{ maxWidth: 320, alignSelf: "center" }}>
-                <div style={{ background: C.card, borderRadius: 20, padding: "15px 17px", boxShadow: "0 10px 30px rgba(0,0,0,0.25)" }}>
-                  <div style={{ fontFamily: "'Fraunces', serif", fontSize: 16.5, color: C.ink, marginBottom: 8 }}>Les cinq onglets</div>
-                  <div style={{ fontSize: 13, color: C.inkSoft, lineHeight: 1.65 }}>
-                    <div><b style={{ color: C.ink }}>Messages</b> — vos échanges, filtrés avant d'être envoyés.</div>
-                    <div><b style={{ color: C.ink }}>Agenda</b> — ce qui est prévu, à valider par les deux.</div>
-                    <div><b style={{ color: C.ink }}>Iris</b> — pour en parler en privé. L'autre n'y a jamais accès.</div>
-                    <div><b style={{ color: C.ink }}>Dépenses</b> — qui a payé quoi, et ce qui reste à régler.</div>
-                    <div><b style={{ color: C.ink }}>Plus</b> — enfants, documents, journal, réglages.</div>
+              <div style={{ maxWidth: 340, alignSelf: "center", width: "100%", position: "relative" }}>
+                <div style={{ background: C.card, borderRadius: 22, padding: "18px 19px", boxShadow: "0 18px 44px rgba(35,30,25,0.34)" }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 1.1, color: C.taupe, textTransform: "uppercase", marginBottom: 7 }}>Pour t'y retrouver</div>
+                  <div style={{ fontFamily: "'Fraunces', serif", fontSize: 19, color: C.ink, lineHeight: 1.25, marginBottom: 13 }}>Les cinq onglets</div>
+                  {[
+                    [MessageCircle, "Messages", "Vos échanges, filtrés avant d'être envoyés."],
+                    [CalendarDays, "Agenda", "Ce qui est prévu, validé par vous deux."],
+                    [TamiseMark, "Iris", "Pour en parler en privé. L'autre n'y a jamais accès."],
+                    [Receipt, "Dépenses", "Qui a payé quoi, et ce qui reste à régler."],
+                    [LayoutGrid, "Plus", "Enfants, documents, journal, réglages."],
+                  ].map(([Ic, titre, desc]) => (
+                    <div key={titre} style={{ display: "flex", gap: 11, alignItems: "flex-start", marginBottom: 10 }}>
+                      <span style={{ width: 28, height: 28, borderRadius: 9, background: C.beigeSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+                        <Ic size={14} color={C.taupe} />
+                      </span>
+                      <div style={{ fontSize: 13, color: C.inkSoft, lineHeight: 1.45 }}>
+                        <b style={{ color: C.ink }}>{titre}</b> — {desc}
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 13 }}>
+                    <div style={{ display: "flex", gap: 5 }}>
+                      <span style={{ width: 6, height: 4, borderRadius: 999, background: C.grey }} />
+                      <span style={{ width: 18, height: 4, borderRadius: 999, background: C.taupe }} />
+                    </div>
+                    <span style={{ fontSize: 12.5, color: C.taupe, fontWeight: 700 }}>C'est parti</span>
                   </div>
-                  <div style={{ fontSize: 12, color: C.taupe, fontWeight: 700, marginTop: 12 }}>Touche l'écran pour commencer</div>
                 </div>
-                <div style={{ fontSize: 30, textAlign: "center", marginTop: -2 }}>↓</div>
+                <svg width="26" height="16" viewBox="0 0 26 16" style={{ position: "absolute", bottom: -14, left: "50%", marginLeft: -13 }}>
+                  <path d="M13 16 L0 0 L26 0 Z" fill={C.card} />
+                </svg>
               </div>
             )}
           </div>
@@ -4926,6 +5054,19 @@ export default function TamiseApp() {
           )}
           {(tab === "agenda" || tab === "depenses") && (
             <div style={{ display: "flex", gap: 8 }}>
+              {tab === "agenda" && rel.relationId && (
+                <button onClick={() => setAbonnementOuvert(true)} aria-label="S'abonner à cet agenda"
+                  style={{ border: "none", cursor: "pointer", background: C.grey, color: C.ink, borderRadius: 999, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <CalendarDays size={14} />
+                </button>
+              )}
+              {tab === "agenda" && agenda.length > 0 && (
+                <button onClick={() => telechargerICS(agenda, "tamise-agenda-" + (partenaire || "relation").toLowerCase().replace(/[^\w-]/g, "-"), "Tamisé — " + partenaire)}
+                  aria-label="Exporter l'agenda"
+                  style={{ border: "none", cursor: "pointer", background: C.grey, color: C.ink, borderRadius: 999, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Download size={14} />
+                </button>
+              )}
               <button
                 onClick={() => {
                   if (tab === "agenda") { setRechercheAgendaOuverte((v) => !v); setRechercheAgenda(""); }
@@ -6268,6 +6409,10 @@ export default function TamiseApp() {
                 <button onClick={() => setEventOuvert(null)} aria-label="Fermer" style={{ border: "none", background: "rgba(255,255,255,0.88)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)", boxShadow: "0 2px 8px rgba(69,62,54,0.16)", borderRadius: 999, width: 30, height: 30, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={15} color={C.ink} /></button>
               </div>
               <div style={{ fontFamily: "'Fraunces', serif", fontSize: 20, color: C.ink, marginTop: 12 }}><TexteCommun item={e} texte={e.titre} /></div>
+              <button onClick={(ev) => { ev.stopPropagation(); telechargerICS([e], "tamise-" + (e.titre || "evenement").slice(0, 20).replace(/[^\w-]/g, "-"), "Tamisé"); }}
+                style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 12, border: `1px solid ${C.grey}`, borderRadius: 999, cursor: "pointer", background: C.card, color: C.taupe, fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", padding: "8px 14px" }}>
+                <CalendarDays size={14} /> Ajouter à mon agenda
+              </button>
               <div style={{ fontSize: 14, color: C.ink, marginTop: 8, lineHeight: 1.7 }}>
                 📅 {JOURS_LONG[lundiIndex(new Date(s.y, s.m, s.d).getDay())]} {s.d} {MOIS_FR[s.m]} {s.y}<br />
                 {e.allDay ? "🕘 Jour entier" : "🕘 " + heureDeISO(e.start) + (heureDeISO(e.end) ? " → " + heureDeISO(e.end) : "")}<br />
