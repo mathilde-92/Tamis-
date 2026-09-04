@@ -249,9 +249,25 @@ function chargerLocal(cle, defaut) {
     return v === null ? defaut : JSON.parse(v);
   } catch (e) { return defaut; }
 }
+/* Vrai si la dernière sauvegarde a échoué faute de place. On le signale à la
+   personne : sans ça, l'app a l'air de marcher alors que plus rien n'est
+   mémorisé, et tout est perdu à la fermeture. */
+let stockageSature = false;
+const abonnesStockage = new Set();
+function signalerStockageSature() {
+  if (stockageSature) return;
+  stockageSature = true;
+  abonnesStockage.forEach((f) => { try { f(true); } catch (e) {} });
+}
+
 function enregistrerLocal(cle, valeur) {
-  try { window.localStorage.setItem("tamise:" + cle, JSON.stringify(valeur)); }
-  catch (e) { /* stockage indisponible : l'app reste utilisable, sans mémoire */ }
+  try {
+    window.localStorage.setItem("tamise:" + cle, JSON.stringify(valeur));
+  } catch (e) {
+    // QuotaExceededError : la mémoire du navigateur est pleine. On prévient,
+    // au lieu de laisser croire que tout va bien.
+    if (e && (e.name === "QuotaExceededError" || e.code === 22 || e.code === 1014)) signalerStockageSature();
+  }
 }
 /** Identifiant de cet appareil, pour distinguer qui a écrit quoi. */
 /** Vrai si l'app tourne en plein écran, installée sur l'écran d'accueil
@@ -1201,6 +1217,48 @@ function telechargerICS(evenements, nomFichier, nomAgenda) {
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (err) { /* export indisponible : on ne casse rien */ }
+}
+
+/* ---- Réduction des images avant stockage ----
+   Le navigateur ne laisse que quelques mégaoctets à l'application. Une photo
+   de téléphone en pèse souvent 3 à 5 à elle seule : quelques-unes suffisent à
+   saturer, et à ce moment-là plus RIEN n'est mémorisé — ni photos, ni messages,
+   ni réglages — sans le moindre avertissement.
+   On redimensionne donc chaque image avant de la garder. Une photo passe
+   typiquement de 4 Mo à 200 Ko, largement assez pour l'écran d'un téléphone.
+   Les PDF ne sont pas touchés : leur texte doit rester lisible. */
+function reduireImage(fichier, cotéMax = 1400, qualite = 0.72) {
+  return new Promise((resolve) => {
+    if (!fichier || !fichier.type || !fichier.type.startsWith("image/")) {
+      const lecteur = new FileReader();
+      lecteur.onload = () => resolve(lecteur.result);
+      lecteur.onerror = () => resolve(null);
+      lecteur.readAsDataURL(fichier);
+      return;
+    }
+    const lecteur = new FileReader();
+    lecteur.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          let { width: l, height: h } = img;
+          if (l > cotéMax || h > cotéMax) {
+            const ratio = Math.min(cotéMax / l, cotéMax / h);
+            l = Math.round(l * ratio);
+            h = Math.round(h * ratio);
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = l; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, l, h);
+          resolve(canvas.toDataURL("image/jpeg", qualite));
+        } catch (e) { resolve(lecteur.result); }
+      };
+      img.onerror = () => resolve(lecteur.result);
+      img.src = lecteur.result;
+    };
+    lecteur.onerror = () => resolve(null);
+    lecteur.readAsDataURL(fichier);
+  });
 }
 
 const BottomSheet = ({ onClose, children }) => (
@@ -2216,9 +2274,7 @@ function AjoutPhoto({ enfants, albums, albumParDefaut, estCoparent, partenaire, 
   function choisirFichier(e) {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => setDataUrl(reader.result);
-    reader.readAsDataURL(f);
+    reduireImage(f).then((url) => { if (url) setDataUrl(url); });
   }
   function creerAlbum() {
     if (!nomNouvelAlbum.trim()) return;
@@ -2327,7 +2383,7 @@ function PhotoDetail({ photo, enfants, albums, partenaire, onDelete, onClose }) 
 /* ---- Note libre de journal (style journal intime, pas liée à un message) ---- */
 /* ---- Fiche document : création (nom + catégorie) et vrai sélecteur de fichier ---- */
 const CATS_DOC = ["Juridique", "Administratif", "École", "Santé", "Sport", "Autre"];
-function DocumentSheet({ doc, partenaire, onSave, onClose }) {
+function DocumentSheet({ doc, partenaire, onSave, onClose, onDelete }) {
   const [nom, setNom] = useState(doc.nouveau ? "" : doc.nom);
   const [cat, setCat] = useState(doc.cat || "Autre");
   const [dataUrl, setDataUrl] = useState(doc.dataUrl || null);
@@ -2339,9 +2395,7 @@ function DocumentSheet({ doc, partenaire, onSave, onClose }) {
     if (!f) return;
     setNomFichier(f.name);
     setType(f.type);
-    const reader = new FileReader();
-    reader.onload = () => setDataUrl(reader.result);
-    reader.readAsDataURL(f);
+    reduireImage(f).then((url) => { if (url) setDataUrl(url); });
   }
   const estImage = dataUrl && (type ? type.startsWith("image/") : dataUrl.startsWith("data:image"));
   return (
@@ -2386,12 +2440,18 @@ function DocumentSheet({ doc, partenaire, onSave, onClose }) {
 
       <div style={{ background: C.sageBg, borderRadius: 14, padding: "12px 14px", marginBottom: 14, display: "flex", gap: 10, alignItems: "flex-start" }}>
         <Shield size={17} color="#5C7A52" style={{ flexShrink: 0, marginTop: 1 }} />
-        <div style={{ fontSize: 12.5, color: "#4A5F42", lineHeight: 1.5 }}>Ce document reste dans l'application. Il n'est <b>jamais</b> partagé à l'extérieur ni utilisé pour entraîner une IA. Iris peut seulement le consulter, dans l'app, pour mieux t'aider.</div>
+        <div style={{ fontSize: 12.5, color: "#4A5F42", lineHeight: 1.5 }}>Pour qu'Iris puisse s'y référer, le texte de ce document est extrait et conservé sur notre serveur, en Suisse. Il n'est <b>jamais</b> partagé à l'extérieur ni utilisé pour entraîner une IA, et il est effacé si tu supprimes le document. Pense à masquer ce que tu ne veux pas y mettre.</div>
       </div>
 
       <button onClick={() => nom.trim() && onSave({ nom: nom.trim(), cat, dataUrl, nomFichier })} disabled={!nom.trim()} style={{ width: "100%", border: "none", cursor: nom.trim() ? "pointer" : "default", background: nom.trim() ? C.taupe : C.grey, color: nom.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit" }}>
         {doc.nouveau ? "Enregistrer le document" : "Mettre à jour"}
       </button>
+      {onDelete && (
+        <button onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          style={{ width: "100%", marginTop: 8, border: "none", cursor: "pointer", background: "none", color: C.brick, borderRadius: 16, padding: "12px", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
+          Supprimer ce document
+        </button>
+      )}
     </>
   );
 }
@@ -3873,6 +3933,11 @@ export default function TamiseApp() {
   const [vueDestinataire, setVueDestinataire] = useState(false);
   const [pinCode, setPinCode] = useState(null);      // code de verrouillage de l'app (null = pas activé)
   const [verrouille, setVerrouille] = useState(false);
+  const [memoirePleine, setMemoirePleine] = useState(stockageSature);
+  useEffect(() => {
+    abonnesStockage.add(setMemoirePleine);
+    return () => abonnesStockage.delete(setMemoirePleine);
+  }, []);
   const [tailleTexte, setTailleTexte] = useState(1); // 0.9 | 1 | 1.15 — échelle de police
 
   /* --- Relations (intercalaires) : chacune a ses propres données --- */
@@ -4019,6 +4084,16 @@ export default function TamiseApp() {
       envoyerElementServeur(rel.relationId, "maj", MON_APPAREIL, { champ, id, patchElement: patch }).catch(() => {});
     }
   };
+
+  /* Supprime un document partout : ici, sur l'autre téléphone, ET le texte
+     extrait côté serveur. Sans ce dernier point, un jugement de divorce
+     supprimé dans l'app resterait stocké en Suisse — c'est le point RGPD. */
+  function supprimerDocument(id) {
+    supprimerElementPartage("docs", id);
+    if (rel.relationId) {
+      fetch(BACKEND_URL + "/api/relations/" + rel.relationId + "/documents/" + id, { method: "DELETE" }).catch(() => {});
+    }
+  }
 
   const supprimerElementPartage = (champ, id) => {
     setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, [champ]: (r[champ] || []).filter((x) => !(x && x.id === id)) } : r)));
@@ -4884,6 +4959,19 @@ export default function TamiseApp() {
           </BottomSheet>
         )}
 
+        {/* ---------- Mémoire du téléphone saturée ---------- */}
+        {memoirePleine && (
+          <div style={{ position: "absolute", left: 12, right: 12, bottom: 96, zIndex: 70, background: C.brick, color: "#fff", borderRadius: 18, padding: "14px 16px", boxShadow: "0 12px 32px rgba(35,30,25,0.3)" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+                <b>La mémoire de ton téléphone est pleine.</b> Tamisé ne peut plus rien enregistrer : ce que tu fais maintenant sera perdu. Supprime quelques photos ou documents dans Plus pour libérer de la place.
+              </div>
+            </div>
+            <button onClick={() => setMemoirePleine(false)} style={{ marginTop: 10, border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 999, padding: "7px 14px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>J'ai compris</button>
+          </div>
+        )}
+
         {/* ---------- Petit guide des boutons (une seule fois) ---------- */}
         {guideEtape !== null && !onboarding && !codeInvitation && !verrouille && (
           <div onClick={() => (guideEtape === 0 ? setGuideEtape(1) : fermerGuide())}
@@ -5558,7 +5646,7 @@ export default function TamiseApp() {
               </Card>
               <Card style={{ padding: 14, gridColumn: "1 / -1", background: C.sageBg, boxShadow: "none", display: "flex", gap: 10, alignItems: "center" }}>
                 <Shield size={18} color="#5C7A52" style={{ flexShrink: 0 }} />
-                <div style={{ fontSize: 12, color: "#4A5F42", lineHeight: 1.5 }}>Tes documents restent dans l'application, chiffrés. Ils ne sont jamais partagés à l'extérieur ni utilisés pour entraîner une IA. Iris peut seulement les consulter, dans l'app, pour te répondre plus justement.</div>
+                <div style={{ fontSize: 12, color: "#4A5F42", lineHeight: 1.5 }}>Le texte de tes documents est conservé sur notre serveur, en Suisse, pour qu'Iris puisse s'y référer. Il n'est jamais partagé à l'extérieur ni utilisé pour entraîner une IA, et il est effacé quand tu supprimes un document.</div>
               </Card>
             </div>
           )}
@@ -5968,7 +6056,7 @@ export default function TamiseApp() {
           {tab === "plus" && plusVue === "confidentialite" && (
             <div className="voile">
               {[
-                { icone: Lock, titre: "Chiffrement", texte: "Tes messages, documents et journaux sont chiffrés. Personne d'autre que toi et " + partenaire + " ne peut les lire depuis nos serveurs." },
+                { icone: Lock, titre: "Où sont tes données", texte: "Ce que tu écris est gardé sur ton téléphone, et ce qui est partagé avec " + partenaire + " passe par notre serveur, hébergé en Suisse. Les échanges avec ce serveur se font par une connexion sécurisée." },
                 { icone: Database, titre: "Aucun entraînement d'IA", texte: "Rien de ce que tu écris n'est utilisé pour entraîner un modèle d'intelligence artificielle, ni par Tamisé ni par un tiers." },
                 { icone: EyeOff, titre: "Aucun partage", texte: "Tes données ne sont jamais vendues ni partagées avec des annonceurs ou des courtiers en données. Le journal sécurisé peut être transmis aux autorités, mais uniquement à ton initiative." },
                 { icone: Shield, titre: "Ce que voit " + partenaire, texte: "Il ou elle voit les messages une fois filtrés, l'agenda et les dépenses partagés, les documents communs. Il ou elle ne voit jamais ton journal personnel, tes réglages, ni tes conversations avec Iris." },
@@ -5987,7 +6075,29 @@ export default function TamiseApp() {
                   </Card>
                 );
               })}
-              <p style={{ fontSize: 11, color: C.inkSoft, textAlign: "center", marginTop: 10, lineHeight: 1.5 }}>Cette page résume nos engagements en langage simple. Une vraie politique de confidentialité, revue par un juriste, sera nécessaire avant le lancement.</p>
+              <div style={{ height: 8 }} />
+              <Card style={{ marginBottom: 10 }}>
+                <div style={{ fontFamily: "'Fraunces', serif", fontSize: 17, color: C.ink, marginBottom: 4 }}>Politique de confidentialité</div>
+                <div style={{ fontSize: 11, color: C.inkSoft, marginBottom: 12 }}>Le détail, en langage clair.</div>
+
+                {[
+                  ["Qui traite tes données", "Tamisé. Pour toute question ou demande concernant tes données, écris à l'adresse de contact indiquée en bas de cette page."],
+                  ["Ce qu'on garde sur ton téléphone", "Tes messages, ton journal personnel, tes réglages, tes conversations avec Iris, et les photos que tu ajoutes. Rien de tout cela ne quitte ton appareil, sauf ce qui est explicitement partagé avec l'autre personne."],
+                  ["Ce qui passe par notre serveur", "Ce que vous partagez à deux : messages transmis, agenda, dépenses, tâches, documents et photos communs. Le texte de tes documents y est aussi extrait, pour qu'Iris puisse s'y référer. Le serveur est hébergé en Suisse."],
+                  ["Ce qui est envoyé à l'IA", "Le texte de ton message au moment de l'envoi, et ce que tu écris à Iris, avec le contexte de la relation. Le prestataire est Infomaniak, en Suisse. Tes textes ne servent jamais à entraîner un modèle."],
+                  ["Pourquoi on traite ces données", "Pour faire fonctionner ce que tu demandes : transmettre un message apaisé, tenir un agenda commun, répondre à tes questions. Sans ces traitements, l'application ne peut pas rendre le service."],
+                  ["Combien de temps", "Tant que la relation existe. Quand tu supprimes une relation, tout ce qu'elle contient est effacé, sur ton téléphone et sur le serveur. Un document supprimé efface aussi le texte qui en avait été extrait."],
+                  ["Tes droits", "Tu peux à tout moment consulter tes données dans l'application, les corriger, les exporter (agenda), ou les effacer. Tu peux aussi t'adresser à la CNIL si tu estimes que tes droits ne sont pas respectés."],
+                  ["Enfants", "Les fiches enfants ne contiennent que ce que tu y mets. N'y inscris que le nécessaire, et rien de médical sensible dont tu n'aurais pas l'usage."],
+                  ["Ce qu'on ne fait pas", "Pas de publicité, pas de revente, pas de courtiers en données, pas de traceurs publicitaires, pas de profilage à des fins commerciales."],
+                ].map(([titre, texte]) => (
+                  <div key={titre} style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, marginBottom: 3 }}>{titre}</div>
+                    <div style={{ fontSize: 12, color: C.inkSoft, lineHeight: 1.55 }}>{texte}</div>
+                  </div>
+                ))}
+              </Card>
+              <p style={{ fontSize: 11, color: C.inkSoft, textAlign: "center", marginTop: 10, lineHeight: 1.5 }}>Cette politique est écrite en langage simple et doit être relue par un juriste avant l'ouverture au public. Deux points restent à trancher avec lui : la valeur de preuve du journal sécurisé, et le cadre exact du filtrage des messages.</p>
             </div>
           )}
         </div>
@@ -6175,7 +6285,13 @@ export default function TamiseApp() {
         {/* ---------- Ajout / consultation d'un document ---------- */}
         {docCible && (
           <BottomSheet onClose={() => setDocCible(null)}>
-            <DocumentSheet doc={docCible} partenaire={partenaire} onClose={() => setDocCible(null)} onSave={attacherDoc} />
+            <DocumentSheet doc={docCible} partenaire={partenaire} onClose={() => setDocCible(null)} onSave={attacherDoc}
+              onDelete={docCible.nouveau ? null : () => {
+                if (window.confirm("Supprimer définitivement « " + docCible.nom + " » ? Le fichier et le texte que Tamisé en avait extrait seront effacés, ici comme sur le serveur.")) {
+                  supprimerDocument(docCible.id);
+                  setDocCible(null);
+                }
+              }} />
           </BottomSheet>
         )}
 
@@ -6294,6 +6410,13 @@ export default function TamiseApp() {
                   ? "Supprimer définitivement « " + rel.nom + " » ? C'est une relation réellement reliée à un autre téléphone : tous les messages échangés, l'agenda, les dépenses et le journal seront perdus pour de bon, des deux côtés."
                   : "Supprimer définitivement « " + rel.nom + " » ? Tous ses messages, son agenda, ses dépenses et son journal seront perdus.";
                 if (window.confirm(avertissement)) {
+                  // Droit à l'effacement : on ne se contente pas de retirer la
+                  // relation de ce téléphone, on demande au serveur d'effacer
+                  // tout ce qui la concerne — messages, agenda, dépenses,
+                  // documents. Sinon des données intimes resteraient stockées.
+                  if (rel.relationId) {
+                    fetch(BACKEND_URL + "/api/relations/" + rel.relationId, { method: "DELETE" }).catch(() => {});
+                  }
                   const autres = relations.filter((r) => r.id !== relId);
                   setRelations(autres);
                   setRelId(autres[0].id);
