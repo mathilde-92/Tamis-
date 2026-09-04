@@ -1440,7 +1440,7 @@ function JumelageSheet({ nom, type, onRelie, onClose }) {
   async function rejoindre() {
     setChargement(true); setErreur(null);
     try {
-      const r = await rejoindreRelationServeur(saisie.trim().toUpperCase(), nom);
+      const r = await rejoindreRelationServeur(saisie.trim().toUpperCase(), monNom.trim());
       setRelationId(r.relationId);
       setEtape("relie");
       onRelie({ relationId: r.relationId, nomAutre: r.nomAutre, type: r.type });
@@ -1541,10 +1541,15 @@ function JumelageSheet({ nom, type, onRelie, onClose }) {
         <>
           <div style={{ fontFamily: "'Fraunces', serif", fontSize: 20, color: C.ink, marginTop: 12 }}>Entre le code reçu</div>
           <p style={{ fontSize: 13, color: C.inkSoft, lineHeight: 1.55, margin: "8px 0 14px" }}>Six caractères, transmis par la personne qui t'a invité·e.</p>
+          <div style={{ background: C.beigeSoft, borderRadius: 14, padding: "11px 13px", marginBottom: 12, fontSize: 12, color: C.taupe, lineHeight: 1.5 }}>
+            Si tu as ajouté Tamisé sur ton écran d'accueil, entre le code <b>depuis ce raccourci</b>, pas depuis un lien ouvert dans le navigateur — sinon la relation se créerait à un autre endroit que ton app installée.
+          </div>
           <input value={saisie} onChange={(e) => { setSaisie(e.target.value.toUpperCase()); setErreur(null); }} placeholder="ABC123" maxLength={6} autoFocus
             style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${erreur ? C.brick : C.grey}`, outline: "none", background: C.card, borderRadius: 16, padding: "16px", fontSize: 26, fontFamily: "'Fraunces', serif", letterSpacing: 6, textAlign: "center", color: C.ink, marginBottom: 12 }} />
+          <input value={monNom} onChange={(e) => setMonNom(e.target.value)} placeholder="Ton prénom, pour que l'autre sache que c'est toi"
+            style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: C.ink, marginBottom: 12 }} />
           {erreur && <p style={{ fontSize: 12, color: C.brick, lineHeight: 1.5, marginBottom: 10 }}>{erreur}</p>}
-          <button onClick={rejoindre} disabled={saisie.trim().length < 6 || chargement}
+          <button onClick={rejoindre} disabled={saisie.trim().length < 6 || !monNom.trim() || chargement}
             style={{ width: "100%", border: "none", cursor: saisie.trim().length >= 6 ? "pointer" : "default", background: saisie.trim().length >= 6 ? C.taupe : C.grey, color: saisie.trim().length >= 6 ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
             {chargement && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
             Relier nos téléphones
@@ -2256,7 +2261,7 @@ function NoteSheet({ enfants, partenaire, onCreate, onClose }) {
       </div>
       <textarea value={texte} onChange={(e) => setTexte(e.target.value)} placeholder="Ex. : Elle a des poux, shampoing fait ce matin. Pense à repasser le peigne ce soir." rows={4}
         style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "13px 15px", fontSize: 13.5, fontFamily: "inherit", color: C.ink, resize: "none", marginBottom: 14 }} />
-      <button onClick={() => texte.trim() && onCreate({ id: "n" + Date.now(), enfantId, texte: texte.trim(), tag, auteur: "moi", date: new Date().toISOString() })} disabled={!texte.trim()} style={{ width: "100%", border: "none", cursor: texte.trim() ? "pointer" : "default", background: texte.trim() ? C.taupe : C.grey, color: texte.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit" }}>Ajouter la note</button>
+      <button onClick={() => texte.trim() && onCreate({ id: "n" + Date.now(), enfantId, texte: texte.trim(), tag, auteur: "moi", proposePar: "moi", date: new Date().toISOString() })} disabled={!texte.trim()} style={{ width: "100%", border: "none", cursor: texte.trim() ? "pointer" : "default", background: texte.trim() ? C.taupe : C.grey, color: texte.trim() ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit" }}>Ajouter la note</button>
     </>
   );
 }
@@ -2894,6 +2899,30 @@ function AjoutEvenement({ dateDefaut, evenement, type, aDesEnfants, onClose, onC
   const [rec, setRec] = useState(ed ? ed.recurrence : "jamais");
   const [alerte, setAlerte] = useState(ed ? ed.alerte : "aucune");
   const [cat, setCat] = useState(ed ? (CATS_EVENT.find((c) => c[0] === ed.cat) || CATS_EVENT[0]) : CATS_EVENT[0]);
+  // Suit le début : la fin change avec lui, comme dans l'agenda de l'iPhone.
+  // On ne touche plus à la fin dès que la personne l'a réglée elle-même —
+  // sinon on écraserait un choix qu'elle vient de faire.
+  const finTouchee = useRef(!!ed);
+  function majDDate(v) {
+    if (!finTouchee.current) {
+      // On garde le même écart en jours entre début et fin qu'avant le
+      // changement (0 pour un événement d'un jour, plus pour un séjour).
+      const ancien = new Date(dDate);
+      const ecartJours = Math.round((new Date(fDate) - ancien) / 86400000);
+      const nouvelleFin = new Date(v);
+      nouvelleFin.setDate(nouvelleFin.getDate() + Math.max(ecartJours, 0));
+      setFDate(isoJour(nouvelleFin.getFullYear(), nouvelleFin.getMonth(), nouvelleFin.getDate()));
+    }
+    setDDate(v);
+  }
+  function majDTime(v) {
+    if (!finTouchee.current && dDate === fDate) {
+      const [h, m] = v.split(":").map(Number);
+      const h2 = (h + 1) % 24;
+      setFTime(String(h2).padStart(2, "0") + ":" + v.split(":")[1]);
+    }
+    setDTime(v);
+  }
   const inputStyle = { border: "none", outline: "none", background: C.grey, borderRadius: 10, padding: "7px 10px", fontSize: 13.5, fontFamily: "inherit", color: C.ink };
   // minWidth:0 lève la largeur minimale qu'iOS impose aux champs date et heure :
   // sans ça ils débordent du cadre et rendent toute la page déplaçable de côté.
@@ -2971,12 +3000,12 @@ function AjoutEvenement({ dateDefaut, evenement, type, aDesEnfants, onClose, onC
           </button>
         </LigneReglage>
         <LigneReglage label="Début" top>
-          <input type="date" value={dDate} onChange={(e) => setDDate(e.target.value)} style={selStyle} />
-          {!allDay && <input type="time" value={dTime} onChange={(e) => setDTime(e.target.value)} style={selStyle} />}
+          <input type="date" value={dDate} onChange={(e) => majDDate(e.target.value)} style={selStyle} />
+          {!allDay && <input type="time" value={dTime} onChange={(e) => majDTime(e.target.value)} style={selStyle} />}
         </LigneReglage>
         <LigneReglage label="Fin" top>
-          <input type="date" value={fDate} onChange={(e) => setFDate(e.target.value)} style={selStyle} />
-          {!allDay && <input type="time" value={fTime} onChange={(e) => setFTime(e.target.value)} style={selStyle} />}
+          <input type="date" value={fDate} onChange={(e) => { finTouchee.current = true; setFDate(e.target.value); }} style={selStyle} />
+          {!allDay && <input type="time" value={fTime} onChange={(e) => { finTouchee.current = true; setFTime(e.target.value); }} style={selStyle} />}
         </LigneReglage>
       </Card>
 
@@ -4326,7 +4355,7 @@ export default function TamiseApp() {
   // chaque lien a la sienne, on la retrouve en revenant dessus, et changer de
   // relation ouvre une conversation neuve. Une remarque sur son ex n'a rien à
   // faire dans le fil consacré à sa sœur.
-  const ACCUEIL_IRIS = { de: "iris", texte: "Je suis Iris, l'intelligence artificielle de Tamisé.\nJe suis là pour t'écouter, t'aider à prendre du recul et t'accompagner dans tes échanges.\nJe peux t'aider à mieux comprendre une situation et à trouver les mots qui te conviennent.\nJe peux me tromper : mes réponses ne remplacent pas celles d'un professionnel.\nJe t'accompagne, mais c'est toujours toi qui décides." };
+  const ACCUEIL_IRIS = { de: "iris", texte: "Je suis Iris, l'intelligence artificielle de Tamisé.\nJe suis là pour t'écouter, t'aider à prendre du recul et t'accompagner dans tes échanges.\n\nJe peux me tromper : mes réponses ne remplacent pas celles d'un professionnel." };
   const coachMsgs = (rel && rel.coachMsgs && rel.coachMsgs.length) ? rel.coachMsgs : [ACCUEIL_IRIS];
   const setCoachMsgs = (maj) => {
     setRelations((rs) => rs.map((r) => {
