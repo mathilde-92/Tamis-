@@ -1576,6 +1576,26 @@ function NouvelleRelation({ onClose, onCreate }) {
   const [nom, setNom] = useState("");
   const [tel, setTel] = useState("");
   const [type, setType] = useState(null);
+  // Jumelage directement ici : avant, il fallait créer la relation, puis
+  // ressortir, puis rouvrir la fiche pour entrer le code. Le repli garde
+  // l'écran court pour qui n'a pas reçu d'invitation.
+  const [aUnCode, setAUnCode] = useState(false);
+  const [code, setCode] = useState("");
+  const [monNom, setMonNom] = useState("");
+  const [chargement, setChargement] = useState(false);
+  const [erreur, setErreur] = useState(null);
+
+  async function valider() {
+    if (!aUnCode || !code.trim()) { onCreate(nom.trim(), type, tel.trim()); return; }
+    setChargement(true); setErreur(null);
+    try {
+      const r = await rejoindreRelationServeur(code.trim().toUpperCase(), monNom.trim());
+      onCreate(nom.trim() || r.nomAutre || "Ma relation", type || r.type, tel.trim(), { relationId: r.relationId });
+    } catch (e) {
+      setErreur(e.message || "Ce code n'a pas fonctionné.");
+      setChargement(false);
+    }
+  }
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1595,7 +1615,31 @@ function NouvelleRelation({ onClose, onCreate }) {
           {type === t.id && <Check size={16} color={C.taupe} style={{ marginLeft: "auto" }} />}
         </button>
       ))}
-      <button onClick={() => onCreate(nom.trim(), type, tel.trim())} disabled={!type} style={{ width: "100%", marginTop: 8, border: "none", cursor: type ? "pointer" : "default", background: type ? C.taupe : C.grey, color: type ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit" }}>Créer cette relation</button>
+      <button onClick={() => { setAUnCode(!aUnCode); setErreur(null); }}
+        style={{ width: "100%", marginTop: 6, border: `1.5px solid ${aUnCode ? C.taupe : C.grey}`, background: aUnCode ? C.beigeSoft : C.card, borderRadius: 14, padding: "12px 14px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", display: "flex", alignItems: "center", gap: 10 }}>
+        <ChevronDown size={16} color={C.taupe} style={{ transform: aUnCode ? "none" : "rotate(-90deg)", transition: "transform .15s", flexShrink: 0 }} />
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: C.ink }}>J'ai reçu un code d'invitation</span>
+      </button>
+
+      {aUnCode && (
+        <div style={{ marginTop: 10 }}>
+          <p style={{ fontSize: 12, color: C.inkSoft, lineHeight: 1.5, margin: "0 2px 10px" }}>
+            Entre le code à six caractères qu'on t'a envoyé. Vos deux téléphones seront reliés dès la création.
+          </p>
+          <input value={code} onChange={(e) => { setCode(e.target.value.toUpperCase()); setErreur(null); }} placeholder="ABC123" maxLength={6}
+            style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${erreur ? C.brick : C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "13px", fontSize: 22, fontFamily: "'Fraunces', serif", letterSpacing: 5, textAlign: "center", color: C.ink, marginBottom: 8 }} />
+          <input value={monNom} onChange={(e) => setMonNom(e.target.value)} placeholder="Ton prénom à toi"
+            style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.grey}`, outline: "none", background: C.card, borderRadius: 14, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: C.ink, marginBottom: 4 }} />
+          <p style={{ fontSize: 11.5, color: C.inkSoft, lineHeight: 1.45, margin: "0 2px 8px" }}>Pour que l'autre personne sache que c'est bien toi qui l'as rejointe.</p>
+          {erreur && <p style={{ fontSize: 12, color: C.brick, lineHeight: 1.5, margin: "0 2px 8px" }}>{erreur}</p>}
+        </div>
+      )}
+
+      <button onClick={valider} disabled={!type || chargement || (aUnCode && (code.trim().length < 6 || !monNom.trim()))}
+        style={{ width: "100%", marginTop: 10, border: "none", cursor: type ? "pointer" : "default", background: type && !chargement ? C.taupe : C.grey, color: type && !chargement ? "#fff" : C.inkSoft, borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        {chargement && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
+        {aUnCode ? "Relier nos deux téléphones" : "Créer cette relation"}
+      </button>
     </>
   );
 }
@@ -4873,10 +4917,12 @@ export default function TamiseApp() {
     }));
   }
 
-  function creerRelation(nom, type, tel) {
+  // extra.relationId : la relation vient d'être reliée à un autre téléphone
+  // depuis l'écran de création, grâce à un code d'invitation.
+  function creerRelation(nom, type, tel, extra) {
     const id = "rel" + Date.now();
     const emojis = { coparent: "🧑🏻", famille: "🏡", couple: "❤️", travail: "💼", ami: "🌿" };
-    setRelations((rs) => [...rs, { id, nom: nom || "Nouvelle relation", type, tel: tel || "", emoji: emojis[type] || "🌸", messages: [], depenses: [], solde: "Rien à régler pour l'instant", agenda: [], docs: [], enfants: [], notesPassage: [], photos: [], albums: [], listes: [], groupesTaches: [], notifPrefs: { actives: true, jours: ["L", "M", "M", "J", "V", "S", "D"], debut: "08:00", fin: "21:00" }, journal: [], journalSecret: [], alerte: false, questionnaire: { type } }]);
+    setRelations((rs) => [...rs, { id, nom: nom || "Nouvelle relation", type, tel: tel || "", emoji: emojis[type] || "🌸", relationId: (extra && extra.relationId) || null, messages: [], depenses: [], solde: "Rien à régler pour l'instant", agenda: [], docs: [], enfants: [], notesPassage: [], photos: [], albums: [], listes: [], groupesTaches: [], notifPrefs: { actives: true, jours: ["L", "M", "M", "J", "V", "S", "D"], debut: "08:00", fin: "21:00" }, journal: [], journalSecret: [], alerte: false, questionnaire: { type } }]);
     setRelId(id);
     setNouvelleRel(false);
     setTab("messages");
@@ -6049,7 +6095,7 @@ export default function TamiseApp() {
                   ) : (
                     <div style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5, marginTop: 8 }}>« {e.texte} »</div>
                   )}
-                  <div style={{ fontSize: 10.5, color: C.inkSoft, marginTop: 8, display: "flex", gap: 6, alignItems: "center" }}><Lock size={10} /> {e.date} · empreinte scellée</div>
+                  <div style={{ fontSize: 10.5, color: C.inkSoft, marginTop: 8, display: "flex", gap: 6, alignItems: "center" }}><Lock size={10} /> {e.date} · conservé non modifiable</div>
                 </Card>
               ))}
             </div>
@@ -6111,8 +6157,8 @@ export default function TamiseApp() {
 
                 {[
                   ["Qui traite tes données", "Tamisé. Pour toute question ou demande concernant tes données, écris à l'adresse de contact indiquée en bas de cette page."],
-                  ["Ce qu'on garde sur ton téléphone", "Tes messages, ton journal personnel, tes réglages, tes conversations avec Iris, et les photos que tu ajoutes. Rien de tout cela ne quitte ton appareil, sauf ce qui est explicitement partagé avec l'autre personne."],
-                  ["Ce qui passe par notre serveur", "Ce que vous partagez à deux : messages transmis, agenda, dépenses, tâches, documents et photos communs. Le texte de tes documents y est aussi extrait, pour qu'Iris puisse s'y référer. Le serveur est hébergé en Suisse."],
+                  ["Ce qui reste sur ton téléphone seulement", "Ton journal personnel, ton journal sécurisé, tes conversations avec Iris et tes réglages. Ces quatre-là ne partent jamais nulle part : ni vers l'autre personne, ni vers notre serveur."],
+                  ["Ce qui passe par notre serveur", "Tout ce que vous partagez à deux : les messages transmis, l'agenda, les dépenses, les tâches, les documents, les photos et les fiches enfants. Le texte de tes documents y est aussi extrait, pour qu'Iris puisse s'y référer. Le serveur est hébergé en Suisse."],
                   ["Ce qui est envoyé à l'IA", "Le texte de ton message au moment de l'envoi, et ce que tu écris à Iris, avec le contexte de la relation. Le prestataire est Infomaniak, en Suisse. Tes textes ne servent jamais à entraîner un modèle."],
                   ["Pourquoi on traite ces données", "Pour faire fonctionner ce que tu demandes : transmettre un message apaisé, tenir un agenda commun, répondre à tes questions. Sans ces traitements, l'application ne peut pas rendre le service."],
                   ["Combien de temps", "Tant que la relation existe. Quand tu supprimes une relation, tout ce qu'elle contient est effacé, sur ton téléphone et sur le serveur. Un document supprimé efface aussi le texte qui en avait été extrait."],
@@ -6439,12 +6485,12 @@ export default function TamiseApp() {
                   ? "Supprimer définitivement « " + rel.nom + " » ? C'est une relation réellement reliée à un autre téléphone : tous les messages échangés, l'agenda, les dépenses et le journal seront perdus pour de bon, des deux côtés."
                   : "Supprimer définitivement « " + rel.nom + " » ? Tous ses messages, son agenda, ses dépenses et son journal seront perdus.";
                 if (window.confirm(avertissement)) {
-                  // Droit à l'effacement : on ne se contente pas de retirer la
-                  // relation de ce téléphone, on demande au serveur d'effacer
-                  // tout ce qui la concerne — messages, agenda, dépenses,
-                  // documents. Sinon des données intimes resteraient stockées.
+                  // On prévient le serveur qu'on quitte cette relation. Il
+                  // n'efface tout que lorsque la SECONDE personne s'en va :
+                  // l'autre garde le droit de conserver ses échanges et ses
+                  // preuves tant qu'elle n'a pas décidé de partir elle aussi.
                   if (rel.relationId) {
-                    fetch(BACKEND_URL + "/api/relations/" + rel.relationId, { method: "DELETE" }).catch(() => {});
+                    fetch(BACKEND_URL + "/api/relations/" + rel.relationId + "?appareil=" + encodeURIComponent(MON_APPAREIL), { method: "DELETE" }).catch(() => {});
                   }
                   const autres = relations.filter((r) => r.id !== relId);
                   setRelations(autres);
