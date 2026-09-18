@@ -1398,9 +1398,24 @@ function GererRelationSheet({ rel, peutSupprimer, onRename, onDelete, onJumeler,
           <div style={{ fontSize: 12.5, color: "#4A5F42", lineHeight: 1.45 }}>Vos deux téléphones sont reliés. Vos messages, agenda et dépenses sont partagés.</div>
         </div>
       ) : (
-        <button onClick={onJumeler} style={{ width: "100%", border: `1.5px dashed ${C.beige}`, cursor: "pointer", background: C.card, color: C.taupe, borderRadius: 14, padding: "12px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-          <UserPlus size={15} /> Relier le téléphone de {rel.nom}
-        </button>
+        <>
+          {rel.codeAttente && (() => {
+            const joursRestants = 7 - Math.floor((Date.now() - new Date(rel.codeGenereLe).getTime()) / 86400000);
+            if (joursRestants <= 0) return null; // le serveur l'a de toute façon purgé
+            return (
+              <div style={{ background: C.beigeSoft, borderRadius: 14, padding: "13px 15px", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: C.inkSoft, marginBottom: 4 }}>Code déjà envoyé, en attente que {rel.nom} le rentre :</div>
+                <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, letterSpacing: 4, color: C.ink, textAlign: "center", margin: "4px 0" }}>{rel.codeAttente}</div>
+                <div style={{ fontSize: 10.5, color: C.taupe, textAlign: "center" }}>
+                  {joursRestants === 1 ? "Expire demain" : `Encore valable ${joursRestants} jours`}
+                </div>
+              </div>
+            );
+          })()}
+          <button onClick={onJumeler} style={{ width: "100%", border: `1.5px dashed ${C.beige}`, cursor: "pointer", background: C.card, color: C.taupe, borderRadius: 14, padding: "12px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <UserPlus size={15} /> {rel.codeAttente ? "Générer un nouveau code" : "Relier le téléphone de " + rel.nom}
+          </button>
+        </>
       )}
 
       {peutSupprimer ? (
@@ -1413,7 +1428,7 @@ function GererRelationSheet({ rel, peutSupprimer, onRename, onDelete, onJumeler,
 }
 
 /* ---- Relier deux téléphones : inviter ou rejoindre avec un code ---- */
-function JumelageSheet({ nom, type, onRelie, onClose }) {
+function JumelageSheet({ nom, type, onRelie, onClose, onCodeGenere }) {
   const [etape, setEtape] = useState("choix"); // choix | code | rejoindre | relie
   const [code, setCode] = useState("");
   const [relationId, setRelationId] = useState(null);
@@ -1442,6 +1457,10 @@ function JumelageSheet({ nom, type, onRelie, onClose }) {
       setCode(r.code);
       setRelationId(r.relationId);
       setEtape("code");
+      // Le code est écrit sur la relation elle-même : sans ça, il n'existait
+      // que dans la mémoire de cet écran et disparaissait en le quittant —
+      // alors qu'il restait, lui, valable 7 jours côté serveur.
+      if (onCodeGenere) onCodeGenere(r.code, r.relationId, new Date().toISOString());
     } catch (e) {
       setErreur("Impossible de générer un code pour l'instant. Réessaie dans un moment.");
     }
@@ -6490,7 +6509,16 @@ export default function TamiseApp() {
             <GererRelationSheet rel={rel} peutSupprimer={relations.length > 1} onClose={() => setGererRelOuvert(false)}
               onRename={(nom) => { patchRel({ nom }); setGererRelOuvert(false); }}
               onSetTel={(tel) => patchRel({ tel })}
-              onJumeler={() => { setGererRelOuvert(false); setJumelageOuvert(true); }}
+              onJumeler={() => {
+                // Un nouveau code va être créé : celui d'avant, s'il n'a jamais
+                // été utilisé, devient inutile. On l'efface tout de suite côté
+                // serveur plutôt que d'attendre la purge à 7 jours — sinon deux
+                // codes resteraient valables en même temps pour la même relation.
+                if (rel.relationIdAttente) {
+                  fetch(BACKEND_URL + "/api/relations/" + rel.relationIdAttente, { method: "DELETE" }).catch(() => {});
+                }
+                setGererRelOuvert(false); setJumelageOuvert(true);
+              }}
               onDelete={() => {
                 const avertissement = rel.relationId
                   ? "Supprimer définitivement « " + rel.nom + " » ? C'est une relation réellement reliée à un autre téléphone : tous les messages échangés, l'agenda, les dépenses et le journal seront perdus pour de bon, des deux côtés."
@@ -6522,6 +6550,7 @@ export default function TamiseApp() {
                 const estDemo = relId === "karim" || relId === "sam";
                 patchRel({
                   relationId,
+                  codeAttente: null, relationIdAttente: null, codeGenereLe: null,
                   ...(nomAutre ? { nom: nomAutre } : {}),
                   ...(estDemo ? {
                     messages: [], agenda: [], depenses: [], docs: [], enfants: [],
@@ -6529,6 +6558,9 @@ export default function TamiseApp() {
                     journal: [], journalSecret: [], alerte: false,
                   } : {}),
                 });
+              }}
+              onCodeGenere={(codeAttente, relationIdAttente, codeGenereLe) => {
+                patchRel({ codeAttente, relationIdAttente, codeGenereLe });
               }} />
           </BottomSheet>
         )}
