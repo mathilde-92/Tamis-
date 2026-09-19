@@ -2059,6 +2059,9 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
   const [nom, setNom] = useState(ed ? ed.nom : "");
   const [montant, setMontant] = useState(ed ? String(ed.montant).replace(".", ",") : "");
   const [payePar, setPayePar] = useState(ed ? ed.payePar : "moi");
+  // Pour qui est la dépense : partagée en deux, ou entièrement pour l'un des
+  // deux. Les dépenses créées avant l'existence de ce champ valent "moitie".
+  const [partage, setPartage] = useState(ed ? (ed.partage || "moitie") : "moitie");
   const [cat, setCat] = useState(ed ? (CATS.find((c) => c[0] === ed.cat) || CATS[0]) : CATS[0]);
   const [verification, setVerification] = useState(false);
   const [erreurContenu, setErreurContenu] = useState(null);
@@ -2074,7 +2077,7 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
     // Si l'intitulé a été adouci, on garde le texte de départ ET les passages
     // repérés dedans : c'est ce qui permettra à l'autre personne de voir ce qui
     // lui était adressé, surligné, si son niveau de protection le permet.
-    onCreate({ nom: retenu, montant: m, cat: cat[0], payePar, info: ed ? ed.info : "Dépense ajoutée manuellement. Le partage par défaut est 50/50 ; ajuste selon ton jugement ou votre accord. Informations indicatives.", ...(retenu !== original ? { texteOriginal: original, detections: detections || [] } : {}) });
+    onCreate({ nom: retenu, montant: m, cat: cat[0], payePar, partage, info: ed ? ed.info : "Dépense ajoutée manuellement. Le partage par défaut est 50/50 ; ajuste selon ton jugement ou votre accord. Informations indicatives.", ...(retenu !== original ? { texteOriginal: original, detections: detections || [] } : {}) });
   }
   async function valider() {
     if (!ok) return;
@@ -2121,6 +2124,28 @@ function AjoutDepense({ partenaire, type, depense, onClose, onCreate, onDelete }
           <button key={v} onClick={() => setPayePar(v)} style={{ flex: 1, border: "none", cursor: "pointer", borderRadius: 12, padding: "11px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", background: payePar === v ? C.taupe : C.beigeSoft, color: payePar === v ? "#fff" : C.taupe }}>{l}</button>
         ))}
       </div>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: C.taupe, marginBottom: 8 }}>Pour qui</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 6 }}>
+        {[
+          ["moitie", "À partager en deux", "Chacun en paie la moitié."],
+          ["moi", "Pour toi seul" + (payePar === "moi" ? "" : " — c'est toi qui dois"), "Rien n'est dû par " + partenaire + "."],
+          ["autre", "Pour " + partenaire + " seul", "La totalité est à sa charge."],
+        ].map(([v, titre, desc]) => (
+          <button key={v} onClick={() => setPartage(v)}
+            style={{ textAlign: "left", border: partage === v ? `1.5px solid ${C.taupe}` : `1.5px solid ${C.grey}`, cursor: "pointer", borderRadius: 13, padding: "10px 13px", fontFamily: "inherit", background: partage === v ? C.beigeSoft : C.card }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: partage === v ? C.taupe : C.ink }}>{titre}</div>
+            <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 2 }}>{desc}</div>
+          </button>
+        ))}
+      </div>
+      <p style={{ fontSize: 11.5, color: C.inkSoft, lineHeight: 1.45, margin: "0 2px 16px" }}>
+        {partage === "moitie"
+          ? (payePar === "moi" ? partenaire + " te devra la moitié." : "Tu devras la moitié à " + partenaire + ".")
+          : partage === "moi"
+            ? (payePar === "moi" ? "Personne ne te doit rien." : "Tu devras la totalité à " + partenaire + ".")
+            : (payePar === "moi" ? partenaire + " te devra la totalité." : "Tu ne dois rien.")}
+      </p>
+
       <div style={{ fontSize: 12.5, fontWeight: 700, color: C.taupe, marginBottom: 8 }}>Catégorie</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
         {CATS.map((c) => (
@@ -4636,8 +4661,23 @@ export default function TamiseApp() {
             const nouveauxDuChamp = parChamp[champ]
               .filter((x) => !x.id || !existants.has(x.id))
               .map((x) => {
-                if (!x || x.proposePar !== "moi") return trier(x);
-                const conv = { ...trier(x), proposePar: "autre" };
+                if (!x) return x;
+                // « qui a payé » suit la même logique que « qui propose » : vrai
+                // chez celui qui l'a créé, à inverser pour celui qui le reçoit.
+                // Oublié une première fois, ce qui faisait qu'une dépense payée
+                // par l'AUTRE personne s'affichait comme payée par « toi ».
+                const inverser = (v) => (v === "moi" ? "autre" : v === "autre" ? "moi" : v);
+                let base = trier(x);
+                if (champ === "depenses") {
+                  // payePar ET partage disent tous deux « moi » ou « autre » du
+                  // point de vue de celui qui a créé la dépense : les deux
+                  // doivent être inversés ici, sinon « pour toi seul » devient
+                  // « pour l'autre seul » et le solde est faux.
+                  if (base.payePar) base = { ...base, payePar: inverser(base.payePar) };
+                  if (base.partage) base = { ...base, partage: inverser(base.partage) };
+                }
+                if (x.proposePar !== "moi") return base;
+                const conv = { ...base, proposePar: "autre" };
                 // Un groupe de tâches peut contenir des tâches, qui portent
                 // elles aussi leur propre proposePar : à convertir également.
                 if (champ === "groupesTaches" && Array.isArray(x.taches)) {
@@ -4716,6 +4756,13 @@ export default function TamiseApp() {
             // réapparaissait en boucle.
             const patchNettoye = { ...(m.patch || {}) };
             delete patchNettoye.proposePar;
+            // Même règle que pour proposePar : « qui a payé » est écrit du
+            // point de vue de celui qui modifie, à inverser pour celui qui reçoit.
+            if (m.champ === "depenses") {
+              const inv = (v) => (v === "moi" ? "autre" : v === "autre" ? "moi" : v);
+              if (patchNettoye.payePar) patchNettoye.payePar = inv(patchNettoye.payePar);
+              if (patchNettoye.partage) patchNettoye.partage = inv(patchNettoye.partage);
+            }
             const liste = maj[m.champ] || r[m.champ] || [];
             maj[m.champ] = liste.map((x) => (x && x.id === m.id ? { ...x, ...patchNettoye } : x));
           });
@@ -4777,7 +4824,17 @@ export default function TamiseApp() {
     setDocCible(null);
   }
   const eur = (n) => n.toFixed(2).replace(".", ",") + " €";
-  const soldeNet = depenses.reduce((net, d) => (d.statut === "regle" || d.validation !== "confirme" ? net : net + (d.payePar === "moi" ? d.montant / 2 : -d.montant / 2)), 0);
+  /* Ce que l'autre personne me doit pour une dépense (négatif si c'est moi qui
+     dois). « partage » dit pour qui est la dépense : en deux, pour moi seul, ou
+     pour l'autre seul. Absent sur les dépenses créées avant : on lit "moitie". */
+  function duParAutre(d) {
+    const part = d.partage || "moitie";
+    const fraction = part === "moitie" ? 0.5 : 1;
+    if (part === "moi" && d.payePar === "moi") return 0;   // je paie pour moi
+    if (part === "autre" && d.payePar === "autre") return 0; // elle paie pour elle
+    return d.payePar === "moi" ? d.montant * fraction : -d.montant * fraction;
+  }
+  const soldeNet = depenses.reduce((net, d) => (d.statut === "regle" || d.validation !== "confirme" ? net : net + duParAutre(d)), 0);
   const soldeLabel = Math.abs(soldeNet) < 0.005 ? "Comptes équilibrés" : soldeNet > 0 ? partenaire + " te doit " + eur(soldeNet) : "Tu dois " + eur(-soldeNet) + " à " + partenaire;
   const nbAttente = depenses.filter((d) => d.statut === "attente").length;
   function majDepense(id, patch) {
@@ -4789,9 +4846,9 @@ export default function TamiseApp() {
   function enregistrerDepense(dep) {
     if (depenseEdit) {
       // Toute modification remet la dépense en attente de validation par l'autre, même si elle était déjà validée.
-      majDepense(depenseEdit.id, { nom: dep.nom, montant: dep.montant, payePar: dep.payePar, cat: dep.cat, info: dep.info, validation: "attente", proposePar: "moi" });
+      majDepense(depenseEdit.id, { nom: dep.nom, montant: dep.montant, payePar: dep.payePar, partage: dep.partage, cat: dep.cat, info: dep.info, validation: "attente", proposePar: "moi" });
     } else {
-      pushRel("depenses", { id: "d" + Date.now(), nom: dep.nom, montant: dep.montant, payePar: dep.payePar, cat: dep.cat, statut: "attente", regleLe: null, validation: "attente", proposePar: "moi", info: dep.info });
+      pushRel("depenses", { id: "d" + Date.now(), nom: dep.nom, montant: dep.montant, payePar: dep.payePar, partage: dep.partage || "moitie", cat: dep.cat, statut: "attente", regleLe: null, validation: "attente", proposePar: "moi", info: dep.info });
     }
     setAjoutDepense(false); setDepenseEdit(null);
   }
@@ -5528,7 +5585,7 @@ export default function TamiseApp() {
                         <div style={{ fontSize: 14.5, fontWeight: 700, color: C.ink }}><TexteCommun item={d} texte={d.nom} /></div>
                         <div style={{ marginTop: 5, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                           <Tag tone={d.cat === "Santé" ? "sage" : "beige"}>{d.cat}</Tag>
-                          <span style={{ fontSize: 11.5, color: C.inkSoft }}>payé par {d.payePar === "moi" ? "toi" : partenaire}</span>
+                          <span style={{ fontSize: 11.5, color: C.inkSoft }}>payé par {d.payePar === "moi" ? "toi" : partenaire}{(d.partage || "moitie") !== "moitie" ? (d.partage === "moi" ? " · pour toi" : " · pour " + partenaire) : ""}</span>
                         </div>
                       </div>
                       <div style={{ fontFamily: "'Fraunces', serif", fontSize: 16, color: C.ink, whiteSpace: "nowrap" }}>{eur(d.montant)}</div>
@@ -5551,7 +5608,7 @@ export default function TamiseApp() {
                       {regle ? (
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "#5C7A52" }}><Check size={14} /> Réglé le {parseISO(d.regleLe).d}/{parseISO(d.regleLe).m + 1}</span>
                       ) : (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "#B07D2E" }}><Clock size={13} /> En attente · {d.payePar === "moi" ? partenaire + " te doit " : "tu dois "}{eur(d.montant / 2)}</span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "#B07D2E" }}><Clock size={13} /> En attente{duParAutre(d) === 0 ? " · rien à rembourser" : (duParAutre(d) > 0 ? " · " + partenaire + " te doit " + eur(duParAutre(d)) : " · tu dois " + eur(-duParAutre(d)))}</span>
                       )}
                       <button onClick={() => majDepense(d.id, regle ? { statut: "attente", regleLe: null } : { statut: "regle", regleLe: isoJour(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()) })} style={{ border: "none", cursor: "pointer", borderRadius: 999, padding: "7px 12px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", background: regle ? C.grey : C.taupe, color: regle ? C.ink : "#fff", flexShrink: 0 }}>
                         {regle ? "Annuler" : "Marquer réglé"}
