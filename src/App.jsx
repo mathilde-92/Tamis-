@@ -4537,6 +4537,9 @@ export default function TamiseApp() {
   const [abonnementOuvert, setAbonnementOuvert] = useState(false);
   const [rechercheAgendaOuverte, setRechercheAgendaOuverte] = useState(false);
   const [rechercheAgenda, setRechercheAgenda] = useState("");
+  const [selectionDep, setSelectionDep] = useState(null); // null = pas en mode sélection, sinon tableau d'ids
+  const [reglagesOuvert, setReglagesOuvert] = useState(false); // « tout a été réglé ? »
+  const [regleesVisibles, setRegleesVisibles] = useState(false);
   const [rechercheDepenseOuverte, setRechercheDepenseOuverte] = useState(false);
   const [rechercheDepense, setRechercheDepense] = useState("");
   const [rechercheJournal, setRechercheJournal] = useState("");
@@ -4836,13 +4839,24 @@ export default function TamiseApp() {
   }
   const soldeNet = depenses.reduce((net, d) => (d.statut === "regle" || d.validation !== "confirme" ? net : net + duParAutre(d)), 0);
   const soldeLabel = Math.abs(soldeNet) < 0.005 ? "Comptes équilibrés" : soldeNet > 0 ? partenaire + " te doit " + eur(soldeNet) : "Tu dois " + eur(-soldeNet) + " à " + partenaire;
-  const nbAttente = depenses.filter((d) => d.statut === "attente").length;
+  // Même règle que le solde affiché juste au-dessus : seules comptent les
+  // dépenses validées par les deux ET pas encore réglées. Sans ça, l'encart
+  // annonçait un nombre qui ne correspondait pas au montant affiché.
+  const nbAttente = depenses.filter((d) => d.validation === "confirme" && d.statut !== "regle").length;
   function majDepense(id, patch) {
     setRelations((rs) => rs.map((r) => (r.id === relId ? { ...r, depenses: r.depenses.map((d) => (d.id === id ? { ...d, ...patch } : d)) } : r)));
     if (rel.relationId) {
       envoyerElementServeur(rel.relationId, "maj", MON_APPAREIL, { champ: "depenses", id, patch }).catch(() => {});
     }
   }
+  /* Marque plusieurs dépenses comme réglées d'un coup. Une dépense réglée
+     disparaît de la liste principale : c'est ça, « archiver ». On la retrouve
+     dans la section dépliable en bas. */
+  function reglerPlusieurs(ids) {
+    const aujourdhui = isoJour(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+    ids.forEach((id) => majDepense(id, { statut: "regle", regleLe: aujourdhui }));
+  }
+
   function enregistrerDepense(dep) {
     if (depenseEdit) {
       // Toute modification remet la dépense en attente de validation par l'autre, même si elle était déjà validée.
@@ -5120,6 +5134,39 @@ export default function TamiseApp() {
             })()}
           </BottomSheet>
         )}
+
+        {/* ---------- « Tout a été réglé ? » ---------- */}
+        {reglagesOuvert && (() => {
+          const aRegler = depenses.filter((d) => d.validation === "confirme" && d.statut !== "regle");
+          const total = aRegler.reduce((s, d) => s + duParAutre(d), 0);
+          return (
+            <BottomSheet onClose={() => setReglagesOuvert(false)}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <Tag>Solde</Tag>
+                <button onClick={() => setReglagesOuvert(false)} aria-label="Fermer" style={{ border: "none", background: C.grey, borderRadius: 999, width: 30, height: 30, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={15} color={C.ink} /></button>
+              </div>
+              <div style={{ fontFamily: "'Fraunces', serif", fontSize: 20, color: C.ink, marginTop: 12 }}>Tout a été réglé ?</div>
+              <p style={{ fontSize: 13.5, color: C.inkSoft, lineHeight: 1.55, marginTop: 8 }}>
+                {total === 0
+                  ? "Les comptes sont équilibrés entre vous."
+                  : total > 0
+                    ? partenaire + " te doit " + eur(total) + " au total."
+                    : "Tu dois " + eur(-total) + " à " + partenaire + " au total."}
+              </p>
+              <p style={{ fontSize: 13.5, color: C.inkSoft, lineHeight: 1.55, marginTop: 8 }}>
+                Si ce montant a été versé, les <b style={{ color: C.ink }}>{aRegler.length} dépense{aRegler.length > 1 ? "s" : ""} validée{aRegler.length > 1 ? "s" : ""}</b> passeront en réglées et sortiront de la liste. Tu les retrouveras en bas de l'écran, et tu pourras revenir en arrière à tout moment.
+              </p>
+              <button onClick={() => { reglerPlusieurs(aRegler.map((d) => d.id)); setReglagesOuvert(false); }}
+                style={{ width: "100%", marginTop: 16, border: "none", cursor: "pointer", background: C.taupe, color: "#fff", borderRadius: 16, padding: "14px", fontSize: 14.5, fontWeight: 700, fontFamily: "inherit" }}>
+                Oui, tout marquer comme réglé
+              </button>
+              <button onClick={() => setReglagesOuvert(false)}
+                style={{ width: "100%", marginTop: 8, border: `1.5px solid ${C.grey}`, cursor: "pointer", background: C.card, color: C.ink, borderRadius: 16, padding: "13px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>
+                Pas encore
+              </button>
+            </BottomSheet>
+          );
+        })()}
 
         {/* ---------- Mémoire du téléphone saturée ---------- */}
         {memoirePleine && (
@@ -5558,19 +5605,54 @@ export default function TamiseApp() {
                   {rechercheDepense && <button onClick={() => setRechercheDepense("")} style={{ border: "none", background: "none", color: C.inkSoft, cursor: "pointer", padding: 0 }}><X size={15} /></button>}
                 </div>
               )}
-              <Card style={{ background: C.taupe, color: "#fff", marginBottom: 14 }}>
-                <div style={{ fontSize: 12, opacity: 0.75 }}>Solde en attente</div>
-                <div style={{ fontFamily: "'Fraunces', serif", fontSize: 26, marginTop: 4 }}>{soldeLabel}</div>
-                <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>{depenses.length} dépense{depenses.length > 1 ? "s" : ""} · {nbAttente} en attente</div>
-              </Card>
+              {(() => {
+                const aRegler = depenses.filter((d) => d.validation === "confirme" && d.statut !== "regle");
+                return (
+                  <Card onClick={aRegler.length ? () => setReglagesOuvert(true) : undefined}
+                    style={{ background: C.taupe, color: "#fff", marginBottom: 14, cursor: aRegler.length ? "pointer" : "default" }}>
+                    <div style={{ fontSize: 12, opacity: 0.75 }}>Solde en attente</div>
+                    <div style={{ fontFamily: "'Fraunces', serif", fontSize: 26, marginTop: 4 }}>{soldeLabel}</div>
+                    <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
+                      {nbAttente === 0
+                        ? "Rien à régler pour l'instant"
+                        : nbAttente + " dépense" + (nbAttente > 1 ? "s validées, pas encore réglées" : " validée, pas encore réglée")}
+                    </div>
+                    {aRegler.length > 0 && (
+                      <div style={{ fontSize: 11.5, marginTop: 10, paddingTop: 9, borderTop: "1px solid rgba(255,255,255,0.22)", display: "flex", alignItems: "center", gap: 6 }}>
+                        <Check size={13} /> Tout a été réglé ? Touche ici.
+                      </div>
+                    )}
+                  </Card>
+                );
+              })()}
 
-              <button onClick={() => { setDepenseEdit(null); setAjoutDepense(true); }} style={{ width: "100%", border: `1.5px dashed ${C.beige}`, background: C.card, color: C.taupe, borderRadius: 16, padding: "12px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 14 }}>
-                <Plus size={16} /> Ajouter une dépense
-              </button>
+              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                <button onClick={() => { setDepenseEdit(null); setAjoutDepense(true); }} style={{ flex: 1, border: `1.5px dashed ${C.beige}`, background: C.card, color: C.taupe, borderRadius: 16, padding: "12px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  <Plus size={16} /> Ajouter
+                </button>
+                <button onClick={() => setSelectionDep(selectionDep ? null : [])}
+                  style={{ border: "none", background: selectionDep ? C.taupe : C.beigeSoft, color: selectionDep ? "#fff" : C.taupe, borderRadius: 16, padding: "12px 15px", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", flexShrink: 0 }}>
+                  {selectionDep ? "Annuler" : "Sélectionner"}
+                </button>
+              </div>
+
+              {selectionDep && (
+                <div style={{ background: C.beigeSoft, borderRadius: 16, padding: "12px 14px", marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, color: C.ink, marginBottom: selectionDep.length ? 10 : 0 }}>
+                    {selectionDep.length === 0 ? "Touche les dépenses à marquer comme réglées." : selectionDep.length + " dépense" + (selectionDep.length > 1 ? "s" : "") + " sélectionnée" + (selectionDep.length > 1 ? "s" : "")}
+                  </div>
+                  {selectionDep.length > 0 && (
+                    <button onClick={() => { reglerPlusieurs(selectionDep); setSelectionDep(null); }}
+                      style={{ width: "100%", border: "none", cursor: "pointer", background: C.taupe, color: "#fff", borderRadius: 12, padding: "11px", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
+                      Marquer comme réglées
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Les dépenses qui attendent MA réponse remontent en tête de liste,
                   et reprennent leur place chronologique une fois traitées. */}
-              {depenses.filter((d) => d.validation !== "refuse" && (rechercheDepense.trim() === "" || (d.nom || "").toLowerCase().includes(rechercheDepense.toLowerCase()) || (d.cat || "").toLowerCase().includes(rechercheDepense.toLowerCase()))).slice().sort((a, b) => {
+              {depenses.filter((d) => d.validation !== "refuse" && (regleesVisibles || d.statut !== "regle") && (rechercheDepense.trim() === "" || (d.nom || "").toLowerCase().includes(rechercheDepense.toLowerCase()) || (d.cat || "").toLowerCase().includes(rechercheDepense.toLowerCase()))).slice().sort((a, b) => {
                 const aA = a.validation === "attente" && a.proposePar === "autre" ? 0 : 1;
                 const bA = b.validation === "attente" && b.proposePar === "autre" ? 0 : 1;
                 return aA - bA;
@@ -5579,8 +5661,19 @@ export default function TamiseApp() {
                 const enAttenteValidation = d.validation === "attente";
                 const aConfirmer = enAttenteValidation && d.proposePar === "autre" && !(rel.depensesVues || []).includes(d.id);
                 return (
-                  <Card key={d.id} style={{ marginBottom: 10, ...(aConfirmer ? { background: "#F6ECD9", boxShadow: "none" } : {}) }}>
-                    <button onClick={() => { setDepenseEdit(d); setAjoutDepense(true); if (!(rel.depensesVues || []).includes(d.id)) patchRel({ depensesVues: [...(rel.depensesVues || []), d.id] }); }} style={{ width: "100%", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left", padding: 0, display: "flex", alignItems: "center", gap: 12 }}>
+                  <Card key={d.id} style={{ marginBottom: 10, ...(aConfirmer ? { background: "#F6ECD9", boxShadow: "none" } : {}), ...(selectionDep && selectionDep.includes(d.id) ? { border: `2px solid ${C.taupe}` } : {}) }}>
+                    <button onClick={() => {
+                      if (selectionDep) {
+                        setSelectionDep(selectionDep.includes(d.id) ? selectionDep.filter((x) => x !== d.id) : [...selectionDep, d.id]);
+                        return;
+                      }
+                      setDepenseEdit(d); setAjoutDepense(true); if (!(rel.depensesVues || []).includes(d.id)) patchRel({ depensesVues: [...(rel.depensesVues || []), d.id] });
+                    }} style={{ width: "100%", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left", padding: 0, display: "flex", alignItems: "center", gap: 12 }}>
+                      {selectionDep && (
+                        <span style={{ width: 22, height: 22, borderRadius: 999, flexShrink: 0, border: `1.5px solid ${selectionDep.includes(d.id) ? C.taupe : C.grey}`, background: selectionDep.includes(d.id) ? C.taupe : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {selectionDep.includes(d.id) && <Check size={13} color="#fff" />}
+                        </span>
+                      )}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 14.5, fontWeight: 700, color: C.ink }}><TexteCommun item={d} texte={d.nom} /></div>
                         <div style={{ marginTop: 5, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -5617,12 +5710,19 @@ export default function TamiseApp() {
                   </Card>
                 );
               })}
+              {depenses.some((d) => d.statut === "regle" && d.validation !== "refuse") && (
+                <button onClick={() => setRegleesVisibles(!regleesVisibles)}
+                  style={{ width: "100%", border: `1.5px solid ${C.grey}`, background: C.card, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, color: C.taupe, fontWeight: 700, borderRadius: 14, padding: "11px", marginTop: 4, marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+                  <Check size={14} />
+                  {regleesVisibles ? "Masquer les dépenses réglées" : depenses.filter((d) => d.statut === "regle" && d.validation !== "refuse").length + " dépense" + (depenses.filter((d) => d.statut === "regle" && d.validation !== "refuse").length > 1 ? "s réglées" : " réglée") + " · voir"}
+                </button>
+              )}
               {depenses.some((d) => d.validation === "refuse") && (
                 <button onClick={() => setDepensesRefuseesOuvert(true)} style={{ width: "100%", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, color: C.taupe, fontWeight: 700, textAlign: "center", marginTop: 4, marginBottom: 10, textDecoration: "underline", textUnderlineOffset: 2 }}>
                   {depenses.filter((d) => d.validation === "refuse").length} dépense{depenses.filter((d) => d.validation === "refuse").length > 1 ? "s" : ""} refusée{depenses.filter((d) => d.validation === "refuse").length > 1 ? "s" : ""}, masquée{depenses.filter((d) => d.validation === "refuse").length > 1 ? "s" : ""} du calcul · voir
                 </button>
               )}
-              <div style={{ fontSize: 11.5, color: C.inkSoft, textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>Le solde ne compte que les dépenses en attente.<br />Partage 50/50 par défaut.</div>
+              <div style={{ fontSize: 11.5, color: C.inkSoft, textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>Le solde ne compte que les dépenses validées par vous deux et pas encore réglées.<br />Chaque dépense est partagée en deux, sauf si tu indiques le contraire.</div>
             </div>
           )}
 
