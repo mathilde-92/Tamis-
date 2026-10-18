@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   MessageCircle, CalendarDays, Flower2, Receipt, LayoutGrid, Send, Info, Lightbulb,
   FileText, Shield, X, Check, Loader2, Sparkles, Eye, Bookmark, BookmarkCheck,
@@ -1563,6 +1564,144 @@ function telechargerICS(evenements, nomFichier, nomAgenda) {
    On redimensionne donc chaque image avant de la garder. Une photo passe
    typiquement de 4 Mo à 200 Ko, largement assez pour l'écran d'un téléphone.
    Les PDF ne sont pas touchés : leur texte doit rester lisible. */
+/* ============================================================
+   PHOTOS DE LA CONVERSATION (décision 043)
+
+   Une photo n'est gardée que sur les deux téléphones :
+   - elle est verrouillée (chiffrée) sur le téléphone de l'expéditeur, avec
+     une clé que seuls les deux téléphones peuvent calculer. Chaque téléphone
+     a une paire de clés : il publie la partie publique, garde la partie
+     secrète pour lui. Le serveur voit passer les parties publiques, mais
+     elles ne suffisent pas pour ouvrir une photo ;
+   - elle passe par la « boîte aux lettres » du serveur, qui l'efface dès que
+     l'autre téléphone l'a récupérée (au plus tard au bout de 7 jours) ;
+   - elle est rangée dans le grand espace de stockage du téléphone
+     (IndexedDB), pas avec le reste de l'app, qui n'a que quelques Mo.
+   Elle n'est jamais envoyée à l'IA.
+   ============================================================ */
+function photosDb() {
+  return new Promise((ok, ko) => {
+    const r = indexedDB.open("tamise-photos", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("photos");
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => ko(r.error);
+  });
+}
+async function photoRanger(id, dataUrl) {
+  const db = await photosDb();
+  return new Promise((ok, ko) => {
+    const t = db.transaction("photos", "readwrite");
+    t.objectStore("photos").put(dataUrl, id);
+    t.oncomplete = () => ok(true);
+    t.onerror = () => ko(t.error);
+  });
+}
+async function photoLire(id) {
+  const db = await photosDb();
+  return new Promise((ok, ko) => {
+    const r = db.transaction("photos", "readonly").objectStore("photos").get(id);
+    r.onsuccess = () => ok(r.result || null);
+    r.onerror = () => ko(r.error);
+  });
+}
+async function photoEffacer(id) {
+  const db = await photosDb();
+  return new Promise((ok) => {
+    const t = db.transaction("photos", "readwrite");
+    t.objectStore("photos").delete(id);
+    t.oncomplete = () => ok(true);
+    t.onerror = () => ok(false);
+  });
+}
+const enBase64 = (tampon) => {
+  const octets = new Uint8Array(tampon);
+  let s = "";
+  for (let i = 0; i < octets.length; i += 0x8000) s += String.fromCharCode.apply(null, octets.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+const depuisBase64 = (texte) => Uint8Array.from(atob(texte), (c) => c.charCodeAt(0));
+async function genererClesPhotos() {
+  const paire = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey"]);
+  return {
+    privee: await crypto.subtle.exportKey("jwk", paire.privateKey),
+    publique: await crypto.subtle.exportKey("jwk", paire.publicKey),
+  };
+}
+/** La clé commune aux deux téléphones : chacun la calcule avec SA clé
+ *  secrète et la clé publique de l'autre ; les deux obtiennent la même. */
+async function clePartagee(priveeJwk, publiqueAutreJwk) {
+  const privee = await crypto.subtle.importKey("jwk", priveeJwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]);
+  const publique = await crypto.subtle.importKey("jwk", publiqueAutreJwk, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  return crypto.subtle.deriveKey({ name: "ECDH", public: publique }, privee, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function chiffrerPhoto(dataUrl, cle) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const donnees = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, cle, new TextEncoder().encode(dataUrl));
+  return enBase64(iv) + "." + enBase64(donnees);
+}
+async function dechiffrerPhoto(paquet, cle) {
+  const [iv, donnees] = String(paquet).split(".");
+  const clair = await crypto.subtle.decrypt({ name: "AES-GCM", iv: depuisBase64(iv) }, cle, depuisBase64(donnees));
+  return new TextDecoder().decode(clair);
+}
+
+/** Une photo de la conversation. Floutée tant que la personne qui la reçoit
+ *  n'a pas choisi de la voir, quand elle a demandé la protection forte. */
+function PhotoMessage({ photoId, etat, flouter, onDevoiler }) {
+  const [src, setSrc] = useState(null);
+  const [cherche, setCherche] = useState(true);
+  const [enGrand, setEnGrand] = useState(false);
+  useEffect(() => {
+    let actif = true;
+    setCherche(true);
+    photoLire(photoId)
+      .then((d) => { if (actif) { setSrc(d); setCherche(false); } })
+      .catch(() => { if (actif) setCherche(false); });
+    return () => { actif = false; };
+  }, [photoId, etat]);
+  if (!src) {
+    const texte = cherche ? "Photo…"
+      : etat === "attente" ? "Photo en cours de réception…"
+      : etat === "perdue" ? "Cette photo n'a pas pu être récupérée : elle a attendu plus de 7 jours, ou ce téléphone a été réinitialisé."
+      : etat === "illisible" ? "Cette photo ne peut pas être ouverte sur ce téléphone (sa clé a changé)."
+      : "Cette photo n'est plus sur ce téléphone.";
+    return (
+      <div style={{ display: "flex", gap: 8, alignItems: "center", background: C.card, borderRadius: 18, padding: "12px 14px", fontSize: 12.5, color: C.inkSoft, lineHeight: 1.45, boxShadow: "0 4px 14px rgba(69,62,54,0.05)" }}>
+        <Camera size={16} color={C.taupe} style={{ flexShrink: 0 }} /> {texte}
+      </div>
+    );
+  }
+  return (
+    <>
+      <div style={{ position: "relative", borderRadius: 18, overflow: "hidden", boxShadow: "0 4px 14px rgba(69,62,54,0.08)", background: C.beigeSoft }}>
+        <img src={src} alt="Photo" onClick={() => { if (!flouter) setEnGrand(true); }}
+          style={{ display: "block", width: "100%", maxHeight: 340, objectFit: "cover", cursor: flouter ? "default" : "zoom-in", filter: flouter ? "blur(26px)" : "none", transform: flouter ? "scale(1.15)" : "none" }} />
+        {flouter && (
+          <button onClick={onDevoiler}
+            style={{ position: "absolute", inset: 0, border: "none", cursor: "pointer", background: "transparent", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", padding: 14 }}>
+            {/* Un encart opaque : lisible quelle que soit la photo dessous. */}
+            <span style={{ background: "rgba(247,244,239,0.94)", borderRadius: 16, padding: "12px 14px", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, maxWidth: 210, boxShadow: "0 4px 14px rgba(69,62,54,0.12)" }}>
+              <EyeOff size={18} color={C.taupe} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>Appuyer pour voir</span>
+              <span style={{ fontSize: 11, color: C.inkSoft, lineHeight: 1.4, textAlign: "center" }}>Tu as choisi la protection forte : tu décides de ce que tu regardes.</span>
+            </span>
+          </button>
+        )}
+      </div>
+      {/* En grand, par-dessus tout l'écran. Rendu à la racine de la page :
+          à l'intérieur de la bulle animée, il resterait coincé dans la bulle. */}
+      {enGrand && createPortal(
+        <div onClick={() => setEnGrand(false)} role="dialog" aria-label="Photo en grand"
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(24,21,18,0.94)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, cursor: "zoom-out" }}>
+          <img src={src} alt="Photo en grand" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 12 }} />
+          <span style={{ position: "absolute", top: 18, right: 18, width: 34, height: 34, borderRadius: 999, background: "rgba(255,255,255,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={16} color={C.ink} /></span>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 function reduireImage(fichier, cotéMax = 1400, qualite = 0.72) {
   return new Promise((resolve) => {
     if (!fichier || !fichier.type || !fichier.type.startsWith("image/")) {
@@ -4395,6 +4534,10 @@ export default function TamiseApp() {
 
   /* --- Relations (intercalaires) : chacune a ses propres données --- */
   const [relations, setRelations] = useState(() => chargerLocal("relations", null) || []);
+  // Toujours la dernière version des relations, pour les tâches qui tournent
+  // en arrière-plan (réception des photos) sans être recréées à chaque rendu.
+  const relationsRef = useRef(relations);
+  relationsRef.current = relations;
   const [relId, setRelId] = useState(() => chargerLocal("relId", null));
   const REL_VIDE = { id: "vide", nom: "", type: "coparent", tel: "", emoji: "🌸", messages: [], depenses: [], solde: "Rien à régler pour l'instant", agenda: [], docs: [], enfants: [], notesPassage: [], photos: [], albums: [], listes: [], groupesTaches: [], notifPrefs: { actives: true, jours: ["L", "M", "M", "J", "V", "S", "D"], debut: "08:00", fin: "21:00" }, journal: [], journalSecret: [], alerte: false, questionnaire: null,
     // Niveau de protection à la LECTURE, choisi par soi, pour cette relation :
@@ -4934,8 +5077,15 @@ export default function TamiseApp() {
             const c = decoder(e);
             return c.retenu
               ? { id: "srv" + e.id, de: "autre", retenu: true, niveau: "grave", heure: c.heure, date: c.date, original: c.original || null, typeMeca: c.typeMeca || null, detections: c.detections || [] }
-              : { id: "srv" + e.id, de: "autre", texte: c.texte, texteOriginal: c.original || c.texte, aOriginal: !!c.original, detections: c.detections || [], filtre: !!c.filtre, niveau: c.niveau, heure: c.heure, date: c.date };
+              : { id: "srv" + e.id, de: "autre", texte: c.texte, texteOriginal: c.original || c.texte, aOriginal: !!c.original, detections: c.detections || [], filtre: !!c.filtre, niveau: c.niveau, heure: c.heure, date: c.date,
+                  // Message photo : seule la référence voyage ici. La photo
+                  // elle-même attend, chiffrée, dans la boîte aux lettres.
+                  ...(c.photo && c.photo.id ? { photo: { id: String(c.photo.id), etat: "attente" } } : {}) };
           });
+
+        // Clé publique de l'autre téléphone, pour ouvrir ses photos.
+        const clesRecues = desAutres.filter((e) => e.type === "cle").map(decoder).filter((c) => c && c.publique);
+        const cleRecue = clesRecues.length ? clesRecues[clesRecues.length - 1].publique : null;
 
         // Les originaux des messages retenus vont dans le journal sécurisé du
         // destinataire (horodatés, non modifiables) : c'est SA preuve, à
@@ -4961,6 +5111,7 @@ export default function TamiseApp() {
         setRelations((rs) => rs.map((r) => {
           if (r.id !== relId) return r;
           const maj = { ...r, dernierId };
+          if (cleRecue) maj.cleAutre = cleRecue;
 
           /* ---- Le tri se fait ICI, à l'arrivée ----
              En protection forte, le texte d'origine et les mécanismes repérés
@@ -5126,6 +5277,8 @@ export default function TamiseApp() {
 
           return maj;
         }));
+        // Des photos viennent d'arriver : on va les chercher sans attendre.
+        if (nouveaux.some((m) => m.photo)) setTimeout(() => recupererPhotosEnAttente(rel.relationId, relId), 400);
       } catch (e) { /* silencieux : on réessaiera au prochain passage */ }
     }
 
@@ -5133,6 +5286,132 @@ export default function TamiseApp() {
     const t = setInterval(recuperer, 5000);
     return () => { actif = false; clearInterval(t); };
   }, [rel.relationId, relId]);
+
+  /* ---- Photos de la conversation (décision 043) ---- */
+
+  // Chaque téléphone a sa paire de clés pour cette relation et publie la
+  // partie publique. La partie secrète ne quitte jamais le téléphone.
+  useEffect(() => {
+    if (!rel.relationId || !window.crypto || !window.crypto.subtle) return;
+    let actif = true;
+    (async () => {
+      try {
+        if (!rel.cleMoi) {
+          const cles = await genererClesPhotos();
+          if (actif) patchRel({ cleMoi: cles, clePubliee: false });
+          return; // l'effet repassera avec la clé enregistrée
+        }
+        if (!rel.clePubliee) {
+          await envoyerElementServeur(rel.relationId, "cle", MON_APPAREIL, { publique: rel.cleMoi.publique });
+          if (actif) patchRel({ clePubliee: true });
+        }
+      } catch (e) { /* on réessaiera à la prochaine ouverture */ }
+    })();
+    return () => { actif = false; };
+  }, [rel.relationId, relId, !!rel.cleMoi, !!rel.clePubliee]);
+
+  // Réception : va chercher chaque photo dans la boîte aux lettres, l'ouvre,
+  // la range sur ce téléphone, puis demande au serveur de l'effacer.
+  const photosEnCours = useRef(new Set());
+  function marquerPhoto(idRel, photoId, etat) {
+    setRelations((rs) => rs.map((r) => (r.id === idRel
+      ? { ...r, messages: (r.messages || []).map((m) => (m.photo && m.photo.id === photoId ? { ...m, photo: { ...m.photo, etat } } : m)) }
+      : r)));
+  }
+  async function recupererPhotosEnAttente(relationIdServeur, idRel) {
+    const r = (relationsRef.current || []).find((x) => x.id === idRel);
+    if (!r || !relationIdServeur || !r.cleMoi || !r.cleAutre) return;
+    const enAttente = (r.messages || []).filter((m) => m.de === "autre" && m.photo && m.photo.etat === "attente" && !photosEnCours.current.has(m.photo.id));
+    if (!enAttente.length) return;
+    let cle;
+    try { cle = await clePartagee(r.cleMoi.privee, r.cleAutre); } catch (e) { return; }
+    for (const m of enAttente) {
+      const pid = m.photo.id;
+      const adresse = BACKEND_URL + "/api/relations/" + relationIdServeur + "/boite/" + encodeURIComponent(pid);
+      photosEnCours.current.add(pid);
+      try {
+        const rep = await fetch(adresse);
+        if (rep.status === 404) { marquerPhoto(idRel, pid, "perdue"); continue; }
+        if (!rep.ok) continue; // serveur indisponible : on réessaiera
+        const { donnees } = await rep.json();
+        const dataUrl = await dechiffrerPhoto(donnees, cle);
+        await photoRanger(pid, dataUrl);
+        marquerPhoto(idRel, pid, "recue");
+        // Rangée sur ce téléphone : le serveur n'a plus aucune raison de la garder.
+        fetch(adresse, { method: "DELETE" }).catch(() => {});
+      } catch (e) {
+        // Impossible à ouvrir avec la clé actuelle : ça ne s'arrangera pas.
+        if (e && e.name === "OperationError") marquerPhoto(idRel, pid, "illisible");
+      } finally {
+        photosEnCours.current.delete(pid);
+      }
+    }
+  }
+  // Nouvel essai régulier : une photo qui n'a pas pu être récupérée (réseau,
+  // serveur endormi) n'est pas perdue pour autant.
+  useEffect(() => {
+    if (!rel.relationId) return;
+    const lancer = () => recupererPhotosEnAttente(rel.relationId, relId);
+    lancer();
+    const t = setInterval(lancer, 8000);
+    return () => clearInterval(t);
+  }, [rel.relationId, relId]);
+
+  const photoInputRef = useRef(null);
+  const [envoiPhoto, setEnvoiPhoto] = useState(false);
+  async function envoyerPhoto(fichier) {
+    if (!fichier || envoiPhoto) return;
+    setAvertissementSaisie("");
+    // Prévenir une fois : la photo n'existera que sur les deux téléphones.
+    if (!chargerLocal("photosAverti", false)) {
+      const ok = window.confirm("Les photos de la conversation ne sont gardées que sur vos deux téléphones : notre serveur les transmet sans pouvoir les ouvrir, puis les efface. Si un téléphone est perdu ou si l'app est supprimée, ses photos disparaissent avec lui. Envoyer cette photo ?");
+      if (!ok) return;
+      enregistrerLocal("photosAverti", true);
+    }
+    if (rel.relationId && (!rel.cleMoi || !rel.cleAutre)) {
+      setAvertissementSaisie("La photo pourra partir quand " + partenaire + " aura ouvert une première fois la nouvelle version de Tamisé.");
+      return;
+    }
+    setEnvoiPhoto(true);
+    const photoId = "ph" + Date.now() + Math.random().toString(36).slice(2, 7);
+    try {
+      const dataUrl = await reduireImage(fichier);
+      if (!dataUrl || !String(dataUrl).startsWith("data:image")) throw new Error("lecture");
+      // D'abord sur ce téléphone : si ça échoue, rien ne part.
+      await photoRanger(photoId, dataUrl);
+      if (rel.relationId) {
+        try {
+          const cle = await clePartagee(rel.cleMoi.privee, rel.cleAutre);
+          const paquet = await chiffrerPhoto(dataUrl, cle);
+          const rep = await fetch(BACKEND_URL + "/api/relations/" + rel.relationId + "/boite", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ photoId, donnees: paquet }),
+          });
+          if (!rep.ok) throw new Error("boite " + rep.status);
+        } catch (e) {
+          photoEffacer(photoId).catch(() => {});
+          throw e;
+        }
+      }
+      const heure = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+      const auj = new Date();
+      const date = isoJour(auj.getFullYear(), auj.getMonth(), auj.getDate());
+      // Pas de « niveau » : une photo n'est pas analysée, elle ne doit pas
+      // compter dans les statistiques de messages sains ou adoucis.
+      pushRel("messages", { id: Date.now(), de: "moi", heure, date, photo: { id: photoId, etat: "envoyee" }, texteOriginal: "📷 Photo", texteEnvoye: "📷 Photo" });
+      if (rel.relationId) {
+        envoyerElementServeur(rel.relationId, "message", MON_APPAREIL, { photo: { id: photoId }, texte: "📷 Photo", filtre: false, heure, date }).catch(() => {});
+      }
+    } catch (e) {
+      setAvertissementSaisie("La photo n'a pas pu partir. Réessaie dans un instant.");
+    } finally {
+      setEnvoiPhoto(false);
+    }
+  }
+  function mettrePhotoAuJournalSecurise(m) {
+    if ((rel.journalSecret || []).some((j) => j && j.photoId === m.photo.id)) return;
+    pushRel("journalSecret", { id: "jp" + Date.now(), texte: "Photo reçue de " + partenaire, photoId: m.photo.id, date: new Date().toLocaleString("fr-FR"), type: "Photo", recu: true });
+  }
 
   function sauvegarderAuJournal(m) {
     const texte = m.de === "moi"
@@ -5833,6 +6112,30 @@ export default function TamiseApp() {
                   );
                 }
                 const estMoi = m.de === "moi";
+                // Message photo (décision 043) : floutée chez la personne qui
+                // la reçoit si elle a choisi la protection forte.
+                if (m.photo && m.photo.id) {
+                  const flouter = !estMoi && !vueDestinataire && modeLecture === "forte" && !(rel.photosDevoilees || []).includes(m.photo.id);
+                  const auJournal = (journalSecret || []).some((j) => j && j.photoId === m.photo.id);
+                  return (
+                    <div key={m.id} className="voile" style={{ display: "flex", justifyContent: estMoi ? "flex-end" : "flex-start", marginBottom: 12 }}>
+                      <div style={{ width: "68%", maxWidth: 260 }}>
+                        <PhotoMessage photoId={m.photo.id} etat={m.photo.etat} flouter={flouter}
+                          onDevoiler={() => patchRel({ photosDevoilees: [...(rel.photosDevoilees || []), m.photo.id] })} />
+                        <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: estMoi ? "flex-end" : "flex-start", marginTop: 4 }}>
+                          <span style={{ fontSize: 10.5, color: C.inkSoft }}>{m.heure}</span>
+                          {!estMoi && !vueDestinataire && m.photo.etat === "recue" && (
+                            auJournal
+                              ? <span style={{ fontSize: 11, color: C.inkSoft, display: "inline-flex", alignItems: "center", gap: 4 }}><Lock size={10} /> Dans ton journal sécurisé</span>
+                              : <button onClick={() => mettrePhotoAuJournalSecurise(m)} style={{ border: "none", background: "none", cursor: "pointer", color: C.taupe, fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, textDecoration: "underline", textUnderlineOffset: 2 }}>
+                                  Mettre au journal sécurisé
+                                </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
                 const nonLu = !estMoi && idsMessagesNonLus.has(m.id);
                 // Message REÇU qui a été adouci, et dont l'original a voyagé
                 // parce que le niveau de protection l'autorisait.
@@ -6322,7 +6625,7 @@ export default function TamiseApp() {
                     })}
                   </div>
                 )}
-                <p style={{ fontSize: 11, color: C.inkSoft, textAlign: "center", marginTop: 14, lineHeight: 1.5 }}>Les photos choisies s'affichent vraiment, mais restent dans cet aperçu — un vrai envoi partagé avec {partenaire} demandera un espace de stockage réel, à ajouter plus tard.</p>
+                <p style={{ fontSize: 11, color: C.inkSoft, textAlign: "center", marginTop: 14, lineHeight: 1.5 }}>Les photos de l'album sont partagées avec {partenaire} : elles passent par notre serveur, hébergé en Suisse. Pour une photo qui ne reste que sur vos deux téléphones, envoie-la dans la conversation.</p>
               </div>
             );
           })()}
@@ -6640,11 +6943,15 @@ export default function TamiseApp() {
                     // Un message reçu contient une menace adressée à la personne :
                     // il est conservé comme preuve, mais jamais imposé à la lecture.
                     preuvesOuvertes[e.id] ? (
-                      <div style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5, marginTop: 8 }}>« {e.texte} »</div>
+                      e.photoId
+                        ? <div style={{ marginTop: 8, maxWidth: 260 }}><PhotoMessage photoId={e.photoId} etat="recue" flouter={false} /></div>
+                        : <div style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5, marginTop: 8 }}>« {e.texte} »</div>
                     ) : (
                       <div style={{ marginTop: 8 }}>
                         <div style={{ fontSize: 12.5, color: C.inkSoft, lineHeight: 1.5 }}>
-                          Le message original est conservé ici comme preuve. Il contient une menace — tu n'es pas obligée de le lire.
+                          {e.photoId
+                            ? accordGenre("La photo est conservée ici comme preuve, sur ce téléphone seulement. Tu n'es pas obligé·e de la regarder.", genre)
+                            : "Le message original est conservé ici comme preuve. Il contient une menace — tu n'es pas obligée de le lire."}
                         </div>
                         <button onClick={() => setPreuvesOuvertes({ ...preuvesOuvertes, [e.id]: true })}
                           style={{ marginTop: 8, border: `1.5px solid ${C.grey}`, cursor: "pointer", background: C.card, color: C.brick, borderRadius: 12, padding: "8px 13px", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>
@@ -6718,7 +7025,8 @@ export default function TamiseApp() {
                 {[
                   ["Qui traite tes données", "Tamisé. Pour toute question ou demande concernant tes données, écris à l'adresse de contact indiquée en bas de cette page."],
                   ["Ce qui reste sur ton téléphone seulement", "Ton journal personnel, ton journal sécurisé, tes conversations avec Iris et tes réglages. Ces quatre-là ne partent jamais nulle part : ni vers l'autre personne, ni vers notre serveur."],
-                  ["Ce qui passe par notre serveur", "Tout ce que vous partagez à deux : les messages transmis, l'agenda, les dépenses, les tâches, les documents, les photos et les fiches enfants. Le texte de tes documents y est aussi extrait, pour qu'Iris puisse s'y référer. Le serveur est hébergé en Suisse."],
+                  ["Les photos de la conversation", "Elles sont verrouillées sur le téléphone qui les envoie, avec une clé que seuls vos deux téléphones connaissent. Elles passent par notre serveur sans qu'il puisse les ouvrir, et il les efface dès que l'autre téléphone les a reçues — au plus tard au bout de 7 jours. Ensuite, elles n'existent plus que sur vos deux téléphones : si l'un d'eux est perdu, ses photos sont perdues avec lui. Elles ne sont jamais envoyées à l'IA."],
+                  ["Ce qui passe par notre serveur", "Tout ce que vous partagez à deux : les messages transmis, l'agenda, les dépenses, les tâches, les documents, les photos de l'album et les fiches enfants. Le texte de tes documents y est aussi extrait, pour qu'Iris puisse s'y référer. Le serveur est hébergé en Suisse."],
                   ["Ce qui est envoyé à l'IA", "Le texte de ton message au moment de l'envoi, et ce que tu écris à Iris, avec le contexte de la relation. Le prestataire est Infomaniak, en Suisse. Tes textes ne servent jamais à entraîner un modèle."],
                   ["Pourquoi on traite ces données", "Pour faire fonctionner ce que tu demandes : transmettre un message apaisé, tenir un agenda commun, répondre à tes questions. Sans ces traitements, l'application ne peut pas rendre le service."],
                   ["Combien de temps", "Tant que la relation existe. Quand tu supprimes une relation, tout ce qu'elle contient est effacé, sur ton téléphone et sur le serveur. Un document supprimé efface aussi le texte qui en avait été extrait."],
@@ -6743,7 +7051,18 @@ export default function TamiseApp() {
             {avertissementSaisie && (
               <div style={{ fontSize: 11.5, color: C.brick, marginBottom: 6, paddingLeft: 4 }}>{avertissementSaisie}</div>
             )}
+            {envoiPhoto && (
+              <div style={{ fontSize: 11.5, color: C.inkSoft, marginBottom: 6, paddingLeft: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Envoi de la photo…
+              </div>
+            )}
             <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+              <input ref={photoInputRef} type="file" accept="image/*" style={{ display: "none" }}
+                onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; envoyerPhoto(f); }} />
+              <button onClick={() => photoInputRef.current && photoInputRef.current.click()} disabled={envoiPhoto} aria-label="Envoyer une photo"
+                style={{ border: "none", cursor: envoiPhoto ? "default" : "pointer", background: C.card, color: C.taupe, width: 46, height: 46, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 4px 14px rgba(69,62,54,0.06)", opacity: envoiPhoto ? 0.5 : 1 }}>
+                <Camera size={19} />
+              </button>
               <textarea value={saisie} onChange={(e) => { setSaisie(e.target.value); if (avertissementSaisie) setAvertissementSaisie(""); }} placeholder="Écris librement, Tamisé veille…" rows={saisie.length > 60 ? 3 : 1}
                 style={{ flex: 1, resize: "none", border: "none", outline: "none", background: C.card, borderRadius: 20, padding: "13px 16px", fontSize: 14, fontFamily: "inherit", color: C.ink, boxShadow: "0 4px 14px rgba(69,62,54,0.06)" }} />
               <button onClick={envoyer} aria-label="Envoyer" style={{ border: "none", cursor: "pointer", background: C.taupe, color: "#fff", width: 46, height: 46, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Send size={18} /></button>
@@ -7061,6 +7380,8 @@ export default function TamiseApp() {
                   if (rel.relationId) {
                     fetch(BACKEND_URL + "/api/relations/" + rel.relationId + "?appareil=" + encodeURIComponent(MON_APPAREIL), { method: "DELETE" }).catch(() => {});
                   }
+                  // Ses photos de conversation, rangées à part sur ce téléphone.
+                  (rel.messages || []).forEach((m) => { if (m.photo && m.photo.id) photoEffacer(m.photo.id).catch(() => {}); });
                   const autres = relations.filter((r) => r.id !== relId);
                   setRelations(autres);
                   setRelId(autres[0].id);
